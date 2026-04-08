@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Chris Corbyn <chris@zizq.io>
+// Licensed under the MIT License. See LICENSE file for details.
+
+export {
+  Client,
+  ZizqError,
+  ConnectionError,
+  ResponseError,
+  ClientError,
+  NotFoundError,
+  ServerError,
+} from "./client.ts";
+
+export type {
+  ClientOptions,
+  JobData,
+  EnqueueOptions,
+  FailureOptions,
+  TakeOptions,
+  BackoffConfig,
+  RetentionConfig,
+  JobStatus,
+  UniqueScope,
+} from "./client.ts";
+
+export { Worker } from "./worker.ts";
+
+export type { WorkerOptions, Logger } from "./worker.ts";
+
+export type {
+  JobFunction,
+  JobHandler,
+  ZizqOptions,
+} from "./handler.ts";
+
+export { enqueue } from "./enqueue.ts";
+
+export type { EnqueueOverrides } from "./enqueue.ts";
