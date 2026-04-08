@@ -33,6 +33,6 @@ export type {
   ZizqOptions,
 } from "./handler.ts";
 
-export { enqueue } from "./enqueue.ts";
+export { enqueue, enqueueBulk } from "./enqueue.ts";
 
-export type { EnqueueOverrides } from "./enqueue.ts";
+export type { EnqueueInput } from "./enqueue.ts";

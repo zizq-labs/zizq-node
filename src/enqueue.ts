@@ -15,20 +15,42 @@ import {
 import type { JobFunction, ZizqOptions } from "./handler.ts";
 
 /**
- * Per-enqueue overrides for job configuration.
+ * Input for enqueueing a job.
  *
- * When enqueueing via a function reference, the function's `zizqOptions`
- * provide defaults. Any field set here takes precedence.
+ * The `type` field accepts either a string job type name or a function
+ * reference with optional `zizqOptions`. When a function is provided, its
+ * `zizqOptions` supplies defaults for `queue`, `priority`, etc. Inline
+ * fields on this object take precedence over `zizqOptions` defaults.
  *
- * When enqueueing via a string type, `queue` is required (there are no
- * defaults to fall back on).
+ * When `type` is a string, `queue` is required.
+ *
+ * @example Function reference
+ * ```ts
+ * await enqueue(client, { type: sendEmail, payload: { to: "a@b.com" } });
+ * ```
+ *
+ * @example String type with explicit config
+ * ```ts
+ * await enqueue(client, {
+ *   type: "send_email",
+ *   queue: "emails",
+ *   payload: { to: "a@b.com" },
+ *   priority: 100,
+ * });
+ * ```
  */
-export interface EnqueueOverrides {
+export interface EnqueueInput {
+  /** Job type — a function reference or a string type name. */
+  type: JobFunction | string;
+
+  /** Arbitrary payload delivered to the worker. */
+  payload: unknown;
+
   /**
    * Target queue name.
    *
-   * Must be valid UTF-8 and must not contain any of the following reserved
-   * characters: ",", "?", "*", "[", "]", "{", "}", "!".
+   * Required when `type` is a string and no `zizqOptions.queue` default
+   * is available.
    */
   queue?: string;
 
@@ -74,10 +96,69 @@ export interface EnqueueOverrides {
   uniqueWhile?: UniqueScope;
 }
 
+/**
+ * Enqueue a single job.
+ *
+ * @param client - The Zizq client to use for the HTTP request.
+ * @param input - Job type, payload, and optional configuration.
+ * @returns The created job, including its server-assigned `id` and `status`.
+ *
+ * @example Function reference
+ * ```ts
+ * async function sendEmail(payload) { ... }
+ * sendEmail.zizqOptions = { queue: "emails", priority: 100 };
+ *
+ * const job = await enqueue(client, {
+ *   type: sendEmail,
+ *   payload: { to: "user@example.com" },
+ * });
+ * ```
+ *
+ * @example String type
+ * ```ts
+ * const job = await enqueue(client, {
+ *   type: "send_email",
+ *   queue: "emails",
+ *   payload: { to: "user@example.com" },
+ * });
+ * ```
+ */
+export async function enqueue(
+  client: Client,
+  input: EnqueueInput,
+): Promise<JobData> {
+  return client.enqueue(resolveInput(input));
+}
+
+/**
+ * Enqueue multiple jobs in a single request.
+ *
+ * @param client - The Zizq client to use for the HTTP request.
+ * @param inputs - Array of job inputs.
+ * @returns An array of created jobs in the same order as the input.
+ *
+ * @example
+ * ```ts
+ * const jobs = await enqueueBulk(client, [
+ *   { type: sendEmail, payload: { to: "a@b.com" } },
+ *   { type: sendEmail, payload: { to: "c@d.com" }, priority: 1 },
+ *   { type: "manual_job", queue: "ops", payload: {} },
+ * ]);
+ * ```
+ */
+export async function enqueueBulk(
+  client: Client,
+  inputs: EnqueueInput[],
+): Promise<JobData[]> {
+  return client.enqueueBulk(inputs.map(resolveInput));
+}
+
+// --- Internal ---
+
 // Compute the unique key from ZizqOptions + payload.
 function computeUniqueKey(
   opts: ZizqOptions | undefined,
-  payload: unknown
+  payload: unknown,
 ): string | undefined {
   if (!opts?.uniqueKey) return undefined;
 
@@ -88,56 +169,15 @@ function computeUniqueKey(
   return opts.uniqueKey;
 }
 
-/**
- * Enqueue a job by function reference or string type name.
- *
- * When the first argument is a function, the job type is derived from
- * `fn.zizqOptions.type` or `fn.name`, and config is read from
- * `fn.zizqOptions`. Overrides can be provided in the fourth argument.
- *
- * When the first argument is a string, it is used directly as the job type and
- * the queue must be provided via overrides.
- *
- * @param client - The Zizq client to use for the HTTP request.
- * @param jobOrType - A job function (with optional `zizqOptions`) or a string job type.
- * @param payload - Arbitrary payload delivered to the worker.
- * @param overrides - Optional per-enqueue overrides for queue, priority, etc.
- * @returns The created job, including its server-assigned `id` and `status`.
- *
- * @example Enqueue using a function reference
- * ```ts
- * async function sendEmail(payload) {
- *   await mailer.send(payload.to, payload.subject, payload.body);
- * }
- * sendEmail.zizqOptions = { queue: "emails", priority: 100 };
- *
- * const job = await enqueue(client, sendEmail, {
- *   to: "user@example.com",
- *   subject: "Hello",
- *   body: "World",
- * });
- * ```
- *
- * @example Enqueue using a raw string type
- * ```ts
- * const job = await enqueue(client, "send_email", { to: "user@example.com" }, {
- *   queue: "emails",
- *   priority: 100,
- * });
- * ```
- */
-export async function enqueue(
-  client: Client,
-  jobOrType: JobFunction | string,
-  payload: unknown,
-  overrides?: EnqueueOverrides
-): Promise<JobData> {
+// Resolve an EnqueueInput into a low-level EnqueueOptions by merging
+// inline fields with zizqOptions defaults.
+function resolveInput(input: EnqueueInput): EnqueueOptions {
   let jobType: string;
   let defaults: ZizqOptions | undefined;
 
-  if (typeof jobOrType === "function") {
-    defaults = jobOrType.zizqOptions;
-    jobType = defaults?.type ?? jobOrType.name;
+  if (typeof input.type === "function") {
+    defaults = input.type.zizqOptions;
+    jobType = defaults?.type ?? input.type.name;
 
     if (!jobType) {
       throw new Error(
@@ -145,33 +185,31 @@ export async function enqueue(
       );
     }
   } else {
-    jobType = jobOrType;
+    jobType = input.type;
   }
 
-  const queue = overrides?.queue ?? defaults?.queue;
+  const queue = input.queue ?? defaults?.queue;
 
   if (!queue) {
     throw new Error(`No queue specified for job type "${jobType}"`);
   }
 
   const uniqueKey =
-    overrides?.uniqueKey ?? computeUniqueKey(defaults, payload);
+    input.uniqueKey ?? computeUniqueKey(defaults, input.payload);
 
   const uniqueWhile =
-    overrides?.uniqueWhile ?? defaults?.uniqueWhile;
+    input.uniqueWhile ?? defaults?.uniqueWhile;
 
-  const opts: EnqueueOptions = {
+  return {
     type: jobType,
     queue,
-    payload,
-    priority: overrides?.priority ?? defaults?.priority,
-    readyAt: overrides?.readyAt,
-    retryLimit: overrides?.retryLimit ?? defaults?.retryLimit,
-    backoff: overrides?.backoff ?? defaults?.backoff,
-    retention: overrides?.retention,
+    payload: input.payload,
+    priority: input.priority ?? defaults?.priority,
+    readyAt: input.readyAt,
+    retryLimit: input.retryLimit ?? defaults?.retryLimit,
+    backoff: input.backoff ?? defaults?.backoff,
+    retention: input.retention,
     uniqueKey,
     uniqueWhile: uniqueKey ? uniqueWhile : undefined,
   };
-
-  return client.enqueue(opts);
 }

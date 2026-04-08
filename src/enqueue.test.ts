@@ -3,7 +3,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { enqueue } from "./enqueue.ts";
+import { enqueue, enqueueBulk } from "./enqueue.ts";
 import type { JobFunction } from "./handler.ts";
 import { createMockContext, type MockContext } from "./test-helpers.ts";
 
@@ -35,8 +35,10 @@ describe("enqueue", () => {
         headers: { "content-type": "application/json" },
       });
 
-    const job = await enqueue(ctx.client, "send_email", { to: "a@b.com" }, {
+    const job = await enqueue(ctx.client, {
+      type: "send_email",
       queue: "emails",
+      payload: { to: "a@b.com" },
     });
 
     assert.equal(job.id, "j1");
@@ -53,7 +55,10 @@ describe("enqueue", () => {
     const sendEmail: JobFunction = async (payload) => {};
     sendEmail.zizqOptions = { queue: "emails" };
 
-    const job = await enqueue(ctx.client, sendEmail, { to: "a@b.com" });
+    const job = await enqueue(ctx.client, {
+      type: sendEmail,
+      payload: { to: "a@b.com" },
+    });
     assert.equal(job.id, "j1");
   });
 
@@ -68,11 +73,11 @@ describe("enqueue", () => {
     const handler: JobFunction = async () => {};
     handler.zizqOptions = { type: "custom_type", queue: "q" };
 
-    const job = await enqueue(ctx.client, handler, {});
+    const job = await enqueue(ctx.client, { type: handler, payload: {} });
     assert.equal(job.type, "custom_type");
   });
 
-  it("overrides zizqOptions with inline options", async () => {
+  it("inline fields override zizqOptions", async () => {
     ctx.mockPool
       .intercept({ path: "/jobs", method: "POST" })
       .reply(201, { ...jobResponse, priority: 1 }, {
@@ -82,13 +87,17 @@ describe("enqueue", () => {
     const handler: JobFunction = async () => {};
     handler.zizqOptions = { queue: "emails", priority: 500 };
 
-    const job = await enqueue(ctx.client, handler, {}, { priority: 1 });
+    const job = await enqueue(ctx.client, {
+      type: handler,
+      payload: {},
+      priority: 1,
+    });
     assert.equal(job.priority, 1);
   });
 
   it("throws if no queue specified", async () => {
     await assert.rejects(
-      () => enqueue(ctx.client, "test_job", {}),
+      () => enqueue(ctx.client, { type: "test_job", payload: {} }),
       { message: 'No queue specified for job type "test_job"' }
     );
   });
@@ -107,6 +116,68 @@ describe("enqueue", () => {
       uniqueWhile: "active",
     };
 
-    await enqueue(ctx.client, handler, { userId: 42 });
+    await enqueue(ctx.client, { type: handler, payload: { userId: 42 } });
+  });
+});
+
+describe("enqueueBulk", () => {
+  let ctx: MockContext;
+
+  beforeEach(() => {
+    ctx = createMockContext();
+  });
+
+  afterEach(async () => {
+    await ctx.mockAgent.close();
+  });
+
+  it("enqueues multiple jobs in a single request", async () => {
+    ctx.mockPool
+      .intercept({ path: "/jobs/bulk", method: "POST" })
+      .reply(201, {
+        jobs: [
+          { id: "j1", type: "send_email", queue: "emails", priority: 32768, status: "ready", ready_at: 1000, attempts: 0 },
+          { id: "j2", type: "send_email", queue: "emails", priority: 32768, status: "ready", ready_at: 1000, attempts: 0 },
+        ],
+      }, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const sendEmail: JobFunction = async () => {};
+    sendEmail.zizqOptions = { queue: "emails" };
+
+    const jobs = await enqueueBulk(ctx.client, [
+      { type: sendEmail, payload: { to: "a@b.com" } },
+      { type: sendEmail, payload: { to: "c@d.com" } },
+    ]);
+
+    assert.equal(jobs.length, 2);
+    assert.equal(jobs[0].id, "j1");
+    assert.equal(jobs[1].id, "j2");
+  });
+
+  it("mixes function references and string types", async () => {
+    ctx.mockPool
+      .intercept({ path: "/jobs/bulk", method: "POST" })
+      .reply(201, {
+        jobs: [
+          { id: "j1", type: "sendEmail", queue: "emails", priority: 32768, status: "ready", ready_at: 1000, attempts: 0 },
+          { id: "j2", type: "manual", queue: "ops", priority: 32768, status: "ready", ready_at: 1000, attempts: 0 },
+        ],
+      }, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const sendEmail: JobFunction = async () => {};
+    sendEmail.zizqOptions = { queue: "emails" };
+
+    const jobs = await enqueueBulk(ctx.client, [
+      { type: sendEmail, payload: { to: "a@b.com" } },
+      { type: "manual", queue: "ops", payload: {} },
+    ]);
+
+    assert.equal(jobs.length, 2);
+    assert.equal(jobs[0].id, "j1");
+    assert.equal(jobs[1].id, "j2");
   });
 });
