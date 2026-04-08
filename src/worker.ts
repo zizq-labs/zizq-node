@@ -172,6 +172,7 @@ export class Worker {
   // are sent in the next batch.
   private pendingAcks: string[] = [];
   private ackFlushInFlight = false;
+  private ackFlushPromise: Promise<void> = Promise.resolve();
 
   constructor(options: WorkerOptions) {
     if (options.jobs && options.handler) {
@@ -278,7 +279,9 @@ export class Worker {
       await Promise.allSettled(inFlight);
     }
 
-    // Flush any remaining buffered acks.
+    // Wait for any in-flight ack flush to complete, then flush any
+    // remaining acks that accumulated during the drain.
+    await this.ackFlushPromise;
     await this.flushAcks();
   }
 
@@ -327,7 +330,9 @@ export class Worker {
     this.pendingAcks.push(id);
     if (!this.ackFlushInFlight) {
       this.ackFlushInFlight = true;
-      setImmediate(() => this.flushAcks());
+      this.ackFlushPromise = new Promise<void>((resolve) => {
+        setImmediate(() => this.flushAcks().then(resolve));
+      });
     }
   }
 

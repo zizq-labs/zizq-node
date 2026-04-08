@@ -21,6 +21,7 @@ export type {
   RetentionConfig,
   JobStatus,
   UniqueScope,
+  TlsOptions,
 } from "./client.ts";
 
 export { Worker } from "./worker.ts";

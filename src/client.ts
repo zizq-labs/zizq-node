@@ -301,10 +301,44 @@ export interface TakeOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * TLS configuration for connecting to the Zizq server over HTTPS.
+ *
+ * Values are PEM-encoded strings or Buffers. If loading from files,
+ * use `fs.readFileSync()`.
+ *
+ * @example
+ * ```ts
+ * import fs from "node:fs";
+ *
+ * const client = new Client({
+ *   url: "https://localhost:7890",
+ *   tls: {
+ *     ca: fs.readFileSync("/path/to/ca.pem"),
+ *     cert: fs.readFileSync("/path/to/client.pem"),
+ *     key: fs.readFileSync("/path/to/client-key.pem"),
+ *   },
+ * });
+ * ```
+ */
+export interface TlsOptions {
+  /** PEM-encoded CA certificate(s) for verifying the server. */
+  ca?: string | Buffer;
+
+  /** PEM-encoded client certificate for mTLS. Must be paired with `key`. */
+  cert?: string | Buffer;
+
+  /** PEM-encoded client private key for mTLS. Must be paired with `cert`. */
+  key?: string | Buffer;
+}
+
 /** Options for constructing a {@link Client}. */
 export interface ClientOptions {
   /** Base URL of the Zizq server, e.g. "http://localhost:7890". */
   url: string;
+
+  /** TLS configuration for HTTPS connections. */
+  tls?: TlsOptions;
 
   /** @internal For testing — override the HTTP dispatcher. */
   dispatcher?: Dispatcher;
@@ -399,14 +433,41 @@ export class ServerError extends ResponseError {
  * ```
  */
 export class Client {
+  /** Pool for request/response traffic (enqueue, ack, failure, get). */
   private http: Dispatcher;
+  /** Separate pool for long-lived streaming connections (take). */
+  private streamHttp: Dispatcher;
   private origin: string;
 
   constructor(options: ClientOptions) {
     this.origin = options.url.replace(/\/+$/, "");
-    this.http = options.dispatcher ?? new Pool(this.origin, {
-      allowH2: true,
-    });
+
+    if (options.dispatcher) {
+      // Testing: use the same dispatcher for both.
+      this.http = options.dispatcher;
+      this.streamHttp = options.dispatcher;
+    } else {
+      const connectOpts = options.tls ? {
+        ca: options.tls.ca,
+        cert: options.tls.cert,
+        key: options.tls.key,
+      } : undefined;
+
+      // HTTP/2 for request/response traffic (multiplexed acks, enqueues).
+      this.http = new Pool(this.origin, {
+        allowH2: true,
+        connect: connectOpts,
+      });
+
+      // HTTP/1.1 for the long-lived take stream. HTTP/2 adds framing
+      // overhead and flow control with no multiplexing benefit on a
+      // single long-lived response, resulting in measurably lower
+      // throughput compared to HTTP/1.1 chunked transfer.
+      this.streamHttp = new Pool(this.origin, {
+        allowH2: false,
+        connect: connectOpts,
+      });
+    }
   }
 
   /**
@@ -536,7 +597,7 @@ export class Client {
     const qs = params.toString();
     const path = `/jobs/take${qs ? "?" + qs : ""}`;
 
-    const res = await this.http.request({
+    const res = await this.streamHttp.request({
       method: "GET",
       path,
       headers: { accept: "application/x-ndjson" },
@@ -584,7 +645,7 @@ export class Client {
    * {@link destroy} for hard immediate shutdown.
    */
   async close(): Promise<void> {
-    await this.http.close();
+    await Promise.all([this.http.close(), this.streamHttp.close()]);
   }
 
   /**
@@ -595,7 +656,7 @@ export class Client {
    * an unclean interruption in the REPL).
    */
   async destroy(): Promise<void> {
-    await this.http.destroy();
+    await Promise.all([this.http.destroy(), this.streamHttp.destroy()]);
   }
 
   private async request(
