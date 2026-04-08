@@ -69,7 +69,7 @@ export interface JobData {
   payload?: unknown;
 
   /** When the job becomes eligible to run (ms since Unix epoch). */
-  ready_at: number;
+  readyAt: number;
 
   /** Number of times this job has been previously attempted. */
   attempts: number;
@@ -79,7 +79,7 @@ export interface JobData {
    *
    * Absent means server default applies.
    */
-  retry_limit?: number;
+  retryLimit?: number;
 
   /**
    * Per-job backoff configuration.
@@ -89,13 +89,13 @@ export interface JobData {
   backoff?: BackoffConfig;
 
   /** When the job was last dequeued (ms since Unix epoch). */
-  dequeued_at?: number;
+  dequeuedAt?: number;
 
   /** When the job last failed (ms since Unix epoch). */
-  failed_at?: number;
+  failedAt?: number;
 
   /** When the job was completed (ms since Unix epoch). */
-  completed_at?: number;
+  completedAt?: number;
 
   /**
    * Per-job retention configuration.
@@ -105,17 +105,17 @@ export interface JobData {
   retention?: RetentionConfig;
 
   /** When the reaper will hard-delete this job (ms since Unix epoch). */
-  purge_at?: number;
+  purgeAt?: number;
 
   /**
    * Unique key used for deduplication.
    *
    * Requires a pro license.
    */
-  unique_key?: string;
+  uniqueKey?: string;
 
   /** Uniqueness scope. */
-  unique_while?: UniqueScope;
+  uniqueWhile?: UniqueScope;
 
   /**
    * True if this job was returned as a duplicate of an existing job.
@@ -131,21 +131,21 @@ export interface JobData {
  * This is used in the following formula:
  *
  * ```
- * t = base_ms + (attempts ** exponent) + (attempts * random() * jitter_ms)
+ * t = baseMs + (attempts ** exponent) + (attempts * random() * jitterMs)
  * ```
  *
- * The random jitter is designed to ensure clusters of failed jobs do nit all
+ * The random jitter is designed to ensure clusters of failed jobs do not all
  * retry at the same time but are instead randomly spread out.
  */
 export interface BackoffConfig {
   /** Base delay in milliseconds, applied to all retries. */
-  base_ms: number;
+  baseMs: number;
 
   /** Backoff curve steepness (attempts ** exponent). */
   exponent: number;
 
   /** Maximum random jitter in milliseconds per attempt multiplier. */
-  jitter_ms: number;
+  jitterMs: number;
 }
 
 /**
@@ -155,10 +155,10 @@ export interface BackoffConfig {
  */
 export interface RetentionConfig {
   /** How long completed jobs remain visible (ms). */
-  completed_ms?: number;
+  completedMs?: number;
 
   /** How long dead jobs remain visible (ms). */
-  dead_ms?: number;
+  deadMs?: number;
 }
 
 /**
@@ -171,7 +171,7 @@ export interface RetentionConfig {
  *   queue: "reports",
  *   payload: { reportId: 42 },
  *   priority: 100,            // optional, lower = higher priority
- *   ready_at: Date.now() + 60000, // optional, delay by 1 minute
+ *   readyAt: Date.now() + 60000, // optional, delay by 1 minute
  * });
  * ```
  */
@@ -189,9 +189,6 @@ export interface EnqueueOptions {
 
   /**
    * Arbitrary payload delivered to the worker.
-   *
-   * Must be valid UTF-8 and must not contain any of the following reserved
-   * characters: ",", "?", "*", "[", "]", "{", "}", "!".
    */
   payload: unknown;
 
@@ -208,14 +205,14 @@ export interface EnqueueOptions {
    * When set to a future timestamp the job is created in the "scheduled"
    * status. Otherwise the job is created in the "ready" status.
    */
-  ready_at?: number;
+  readyAt?: number;
 
   /**
    * Optional per-job retry limit.
    *
    * When not set the server default value applies.
    */
-  retry_limit?: number;
+  retryLimit?: number;
 
   /** Optional per-job backoff configuration. */
   backoff?: BackoffConfig;
@@ -231,10 +228,10 @@ export interface EnqueueOptions {
    * The key is global across all queues and job types. Prefix with the job
    * type to make it unique per job type.
    */
-  unique_key?: string;
+  uniqueKey?: string;
 
   /**
-   * Uniqueness scope. Only valid when `unique_key` is set.
+   * Uniqueness scope. Only valid when `uniqueKey` is set.
    *
    * When set to "queued" other jobs with the same key will not be enqueued as
    * long as this job is in the "scheduled" or "ready" statuses.
@@ -246,7 +243,7 @@ export interface EnqueueOptions {
    * for as long as this job remains on the server (i.e. until it is eventually
    * reaped, based on the retention policy).
    */
-  unique_while?: UniqueScope;
+  uniqueWhile?: UniqueScope;
 }
 
 /** Options for reporting a job failure. */
@@ -255,13 +252,13 @@ export interface FailureOptions {
   message: string;
 
   /** Optional error class name, e.g. "TimeoutError". */
-  error_type?: string;
+  errorType?: string;
 
   /** Optional stack trace from the worker. */
   backtrace?: string;
 
   /** Optional forced retry time (ms since epoch), bypassing backoff. */
-  retry_at?: number;
+  retryAt?: number;
 
   /**
    * Kill the job immediately regardless of retry limit.
@@ -278,7 +275,7 @@ export interface FailureOptions {
  * to the server remains open. Clients should use `break` to explicitly
  * disconnect from the endpoint and stop receiving jobs.
  *
- * When no jobs are available, the generator waits until new jobs are enqeued.
+ * When no jobs are available, the generator waits until new jobs are enqueued.
  *
  * @example
  * ```ts
@@ -429,7 +426,8 @@ export class Client {
    * ```
    */
   async enqueue(options: EnqueueOptions): Promise<JobData> {
-    return this.handleResponse(await this.post("/jobs", options)) as Promise<JobData>;
+    const api = enqueueToApi(options);
+    return jobFromApi(await this.handleResponse(await this.post("/jobs", api)));
   }
 
   /**
@@ -446,14 +444,13 @@ export class Client {
    * ```
    */
   async enqueueBulk(jobs: EnqueueOptions[]): Promise<JobData[]> {
-    const data = await this.handleResponse(await this.post("/jobs/bulk", { jobs })) as { jobs: JobData[] };
-    return data.jobs;
+    const api = { jobs: jobs.map(enqueueToApi) };
+    const data = await this.handleResponse(await this.post("/jobs/bulk", api)) as { jobs: unknown[] };
+    return data.jobs.map(jobFromApi);
   }
 
   /**
    * Acknowledge a job as successfully completed.
-   *
-   * 4xx errors can generally be ignored as the job is no longer in-flight.
    *
    * @param id - The job ID to acknowledge.
    * @throws {ZizqError} If the job is not found or not in-flight.
@@ -467,9 +464,6 @@ export class Client {
 
   /**
    * Acknowledge multiple jobs as successfully completed in a single request.
-   *
-   * When lots of acknowledgments occur close together, this can significantly
-   * improve throughput compared with 1:1 requests.
    *
    * Jobs that have already been acknowledged or that don't exist are
    * silently ignored (the server returns 422 but the client treats it
@@ -496,7 +490,8 @@ export class Client {
    * @returns The updated job with its new status and attempt count.
    */
   async reportFailure(id: string, options: FailureOptions): Promise<JobData> {
-    return this.handleResponse(await this.post(`/jobs/${id}/failure`, options)) as Promise<JobData>;
+    const api = failureToApi(options);
+    return jobFromApi(await this.handleResponse(await this.post(`/jobs/${id}/failure`, api)));
   }
 
   /**
@@ -507,7 +502,7 @@ export class Client {
    * @throws {ZizqError} If the job is not found (404).
    */
   async getJob(id: string): Promise<JobData> {
-    return this.handleResponse(await this.request("GET", `/jobs/${id}`)) as Promise<JobData>;
+    return jobFromApi(await this.handleResponse(await this.request("GET", `/jobs/${id}`)));
   }
 
   /**
@@ -570,7 +565,7 @@ export class Client {
           // Empty lines are heartbeats.
           if (line.length === 0) continue;
 
-          yield JSON.parse(line) as JobData;
+          yield jobFromApi(JSON.parse(line));
         }
       }
     } finally {
@@ -664,6 +659,103 @@ export class Client {
     }
     throw buildResponseError(res.statusCode, body);
   }
+}
+
+// --- API format translation ---
+//
+// The server uses snake_case keys. The client exposes camelCase. These
+// helpers translate at the boundary. `undefined` values are stripped via
+// delete so they don't appear as keys in the JSON body, while `null`
+// values are preserved (needed for PATCH resets).
+
+/** Strip keys whose value is `undefined` from an object (in place). */
+function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
+  for (const k in obj) if (obj[k] === undefined) delete obj[k];
+  return obj;
+}
+
+/** Convert an EnqueueOptions to the server's snake_case API format. */
+function enqueueToApi(opts: EnqueueOptions): Record<string, unknown> {
+  return stripUndefined({
+    type: opts.type,
+    queue: opts.queue,
+    payload: opts.payload,
+    priority: opts.priority,
+    ready_at: opts.readyAt,
+    retry_limit: opts.retryLimit,
+    backoff: opts.backoff && backoffToApi(opts.backoff),
+    retention: opts.retention && retentionToApi(opts.retention),
+    unique_key: opts.uniqueKey,
+    unique_while: opts.uniqueWhile,
+  });
+}
+
+/** Convert a FailureOptions to the server's snake_case API format. */
+function failureToApi(opts: FailureOptions): Record<string, unknown> {
+  return stripUndefined({
+    message: opts.message,
+    error_type: opts.errorType,
+    backtrace: opts.backtrace,
+    retry_at: opts.retryAt,
+    kill: opts.kill,
+  });
+}
+
+/** Convert a BackoffConfig to API format. */
+function backoffToApi(b: BackoffConfig): Record<string, unknown> {
+  return { base_ms: b.baseMs, exponent: b.exponent, jitter_ms: b.jitterMs };
+}
+
+/** Convert a RetentionConfig to API format. */
+function retentionToApi(r: RetentionConfig): Record<string, unknown> {
+  return stripUndefined({
+    completed_ms: r.completedMs,
+    dead_ms: r.deadMs,
+  });
+}
+
+/** Convert an API-format job object to a camelCase JobData. */
+function jobFromApi(raw: unknown): JobData {
+  const r = raw as Record<string, unknown>;
+  return stripUndefined({
+    id: r.id,
+    type: r.type,
+    queue: r.queue,
+    priority: r.priority,
+    status: r.status,
+    payload: r.payload,
+    readyAt: r.ready_at,
+    attempts: r.attempts,
+    retryLimit: r.retry_limit,
+    backoff: r.backoff != null ? backoffFromApi(r.backoff) : undefined,
+    dequeuedAt: r.dequeued_at,
+    failedAt: r.failed_at,
+    completedAt: r.completed_at,
+    retention: r.retention != null ? retentionFromApi(r.retention) : undefined,
+    purgeAt: r.purge_at,
+    uniqueKey: r.unique_key,
+    uniqueWhile: r.unique_while,
+    duplicate: r.duplicate,
+  }) as unknown as JobData;
+}
+
+/** Convert an API-format backoff to camelCase. */
+function backoffFromApi(raw: unknown): BackoffConfig {
+  const r = raw as Record<string, unknown>;
+  return {
+    baseMs: r.base_ms as number,
+    exponent: r.exponent as number,
+    jitterMs: r.jitter_ms as number,
+  };
+}
+
+/** Convert an API-format retention to camelCase. */
+function retentionFromApi(raw: unknown): RetentionConfig {
+  const r = raw as Record<string, unknown>;
+  return stripUndefined({
+    completedMs: r.completed_ms,
+    deadMs: r.dead_ms,
+  }) as RetentionConfig;
 }
 
 /** Build the appropriate ResponseError subclass for an HTTP status code. */

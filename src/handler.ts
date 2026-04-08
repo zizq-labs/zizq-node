@@ -31,7 +31,7 @@ import type {
  * sendEmail.zizqOptions = {
  *   queue: "emails",
  *   priority: 100,
- *   retry_limit: 5,
+ *   retryLimit: 5,
  * };
  * ```
  */
@@ -51,7 +51,7 @@ export interface ZizqOptions {
   priority?: number;
 
   /** Default retry limit before the job is killed. */
-  retry_limit?: number;
+  retryLimit?: number;
 
   /** Default backoff configuration. */
   backoff?: BackoffConfig;
@@ -65,10 +65,10 @@ export interface ZizqOptions {
    * Can be a static string or a function that computes the key from the
    * payload at enqueue time.
    */
-  unique_key?: string | ((payload: unknown) => string);
+  uniqueKey?: string | ((payload: unknown) => string);
 
-  /** Uniqueness scope. Only used when `unique_key` is set. */
-  unique_while?: UniqueScope;
+  /** Uniqueness scope. Only used when `uniqueKey` is set. */
+  uniqueWhile?: UniqueScope;
 }
 
 /**

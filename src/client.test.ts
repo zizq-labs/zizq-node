@@ -19,19 +19,17 @@ describe("Client", () => {
 
   describe("enqueue", () => {
     it("posts a job and returns the response", async () => {
-      const jobResponse = {
-        id: "abc123",
-        type: "send_email",
-        queue: "emails",
-        priority: 32768,
-        status: "ready",
-        ready_at: 1000,
-        attempts: 0,
-      };
-
       ctx.mockPool
         .intercept({ path: "/jobs", method: "POST" })
-        .reply(201, jobResponse, {
+        .reply(201, {
+          id: "abc123",
+          type: "send_email",
+          queue: "emails",
+          priority: 32768,
+          status: "ready",
+          ready_at: 1000,
+          attempts: 0,
+        }, {
           headers: { "content-type": "application/json" },
         });
 
@@ -45,6 +43,7 @@ describe("Client", () => {
       assert.equal(job.type, "send_email");
       assert.equal(job.queue, "emails");
       assert.equal(job.status, "ready");
+      assert.equal(job.readyAt, 1000);
     });
 
     it("throws ClientError on 400", async () => {
@@ -96,48 +95,45 @@ describe("Client", () => {
 
   describe("reportFailure", () => {
     it("posts failure and returns updated job", async () => {
-      const updatedJob = {
-        id: "job1",
-        type: "test",
-        queue: "q",
-        priority: 0,
-        status: "scheduled",
-        ready_at: 5000,
-        attempts: 1,
-      };
-
       ctx.mockPool
         .intercept({ path: "/jobs/job1/failure", method: "POST" })
-        .reply(200, updatedJob, {
+        .reply(200, {
+          id: "job1",
+          type: "test",
+          queue: "q",
+          priority: 0,
+          status: "scheduled",
+          ready_at: 5000,
+          attempts: 1,
+        }, {
           headers: { "content-type": "application/json" },
         });
 
       const job = await ctx.client.reportFailure("job1", {
         message: "connection timeout",
-        error_type: "TimeoutError",
+        errorType: "TimeoutError",
       });
 
       assert.equal(job.status, "scheduled");
       assert.equal(job.attempts, 1);
+      assert.equal(job.readyAt, 5000);
     });
   });
 
   describe("getJob", () => {
     it("fetches a job by ID", async () => {
-      const jobData = {
-        id: "job1",
-        type: "test",
-        queue: "q",
-        priority: 0,
-        status: "ready",
-        payload: { key: "value" },
-        ready_at: 1000,
-        attempts: 0,
-      };
-
       ctx.mockPool
         .intercept({ path: "/jobs/job1", method: "GET" })
-        .reply(200, jobData, {
+        .reply(200, {
+          id: "job1",
+          type: "test",
+          queue: "q",
+          priority: 0,
+          status: "ready",
+          payload: { key: "value" },
+          ready_at: 1000,
+          attempts: 0,
+        }, {
           headers: { "content-type": "application/json" },
         });
 
@@ -145,6 +141,7 @@ describe("Client", () => {
 
       assert.equal(job.id, "job1");
       assert.deepEqual(job.payload, { key: "value" });
+      assert.equal(job.readyAt, 1000);
     });
   });
 });

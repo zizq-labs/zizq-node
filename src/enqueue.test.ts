@@ -93,7 +93,7 @@ describe("enqueue", () => {
     );
   });
 
-  it("resolves unique_key from function", async () => {
+  it("resolves uniqueKey from function", async () => {
     ctx.mockPool
       .intercept({ path: "/jobs", method: "POST" })
       .reply(201, jobResponse, {
@@ -103,8 +103,8 @@ describe("enqueue", () => {
     const handler: JobFunction = async () => {};
     handler.zizqOptions = {
       queue: "q",
-      unique_key: (payload: any) => `user-${payload.userId}`,
-      unique_while: "active",
+      uniqueKey: (payload: any) => `user-${payload.userId}`,
+      uniqueWhile: "active",
     };
 
     await enqueue(ctx.client, handler, { userId: 42 });

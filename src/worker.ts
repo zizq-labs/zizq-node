@@ -299,7 +299,7 @@ export class Worker {
     } catch (err) {
       const failure: FailureOptions = {
         message: err instanceof Error ? err.message : String(err),
-        error_type: err instanceof Error ? err.constructor.name : undefined,
+        errorType: err instanceof Error ? err.constructor.name : undefined,
         backtrace: err instanceof Error ? err.stack : undefined,
       };
       await this.withRetry(() => this.client.reportFailure(job.id, failure));

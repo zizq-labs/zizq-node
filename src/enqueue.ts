@@ -45,14 +45,14 @@ export interface EnqueueOverrides {
    * When set to a future timestamp the job is created in the "scheduled"
    * status. Otherwise the job is created in the "ready" status.
    */
-  ready_at?: number;
+  readyAt?: number;
 
   /**
    * Per-job retry limit.
    *
    * When not set the server default value applies.
    */
-  retry_limit?: number;
+  retryLimit?: number;
 
   /** Per-job backoff configuration. */
   backoff?: BackoffConfig;
@@ -68,10 +68,10 @@ export interface EnqueueOverrides {
    * The key is global across all queues and job types. Prefix with the job
    * type to make it unique per job type.
    */
-  unique_key?: string;
+  uniqueKey?: string;
 
-  /** Uniqueness scope. Only valid when `unique_key` is set. */
-  unique_while?: UniqueScope;
+  /** Uniqueness scope. Only valid when `uniqueKey` is set. */
+  uniqueWhile?: UniqueScope;
 }
 
 // Compute the unique key from ZizqOptions + payload.
@@ -79,13 +79,13 @@ function computeUniqueKey(
   opts: ZizqOptions | undefined,
   payload: unknown
 ): string | undefined {
-  if (!opts?.unique_key) return undefined;
+  if (!opts?.uniqueKey) return undefined;
 
-  if (typeof opts.unique_key === "function") {
-    return opts.unique_key(payload);
+  if (typeof opts.uniqueKey === "function") {
+    return opts.uniqueKey(payload);
   }
 
-  return opts.unique_key;
+  return opts.uniqueKey;
 }
 
 /**
@@ -155,22 +155,22 @@ export async function enqueue(
   }
 
   const uniqueKey =
-    overrides?.unique_key ?? computeUniqueKey(defaults, payload);
+    overrides?.uniqueKey ?? computeUniqueKey(defaults, payload);
 
   const uniqueWhile =
-    overrides?.unique_while ?? defaults?.unique_while;
+    overrides?.uniqueWhile ?? defaults?.uniqueWhile;
 
   const opts: EnqueueOptions = {
     type: jobType,
     queue,
     payload,
     priority: overrides?.priority ?? defaults?.priority,
-    ready_at: overrides?.ready_at,
-    retry_limit: overrides?.retry_limit ?? defaults?.retry_limit,
+    readyAt: overrides?.readyAt,
+    retryLimit: overrides?.retryLimit ?? defaults?.retryLimit,
     backoff: overrides?.backoff ?? defaults?.backoff,
     retention: overrides?.retention,
-    unique_key: uniqueKey,
-    unique_while: uniqueKey ? uniqueWhile : undefined,
+    uniqueKey,
+    uniqueWhile: uniqueKey ? uniqueWhile : undefined,
   };
 
   return client.enqueue(opts);
