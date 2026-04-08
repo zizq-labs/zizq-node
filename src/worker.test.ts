@@ -66,7 +66,7 @@ describe("Worker", () => {
       });
 
     ctx.mockPool
-      .intercept({ path: "/jobs/j1/success", method: "POST" })
+      .intercept({ path: "/jobs/success", method: "POST" })
       .reply(204, "");
 
     const worker = new Worker({
@@ -105,7 +105,7 @@ describe("Worker", () => {
       });
 
     ctx.mockPool
-      .intercept({ path: "/jobs/j2/success", method: "POST" })
+      .intercept({ path: "/jobs/success", method: "POST" })
       .reply(204, "");
 
     const worker = new Worker({

@@ -167,6 +167,14 @@ export class Worker {
   private dispatch: (job: JobData) => Promise<void>;
   private abortController: AbortController | null = null;
 
+  // Bulk ack batching buffer.
+  // Success acks are buffered and flushed in a single bulk request.
+  // The bulk ack is scheduled via queueMicrotask and only one bulk ack runs at
+  // a time. While a bulk ack request is in flight, new acks accumulate and
+  // are sent in the next batch.
+  private pendingAcks: string[] = [];
+  private ackFlushInFlight = false;
+
   constructor(options: WorkerOptions) {
     if (options.jobs && options.handler) {
       throw new Error("Provide either `jobs` or `handler`, not both.");
@@ -274,6 +282,9 @@ export class Worker {
     if (inFlight.size > 0) {
       await Promise.allSettled(inFlight);
     }
+
+    // Flush any remaining buffered acks.
+    await this.flushAcks();
   }
 
   /**
@@ -289,13 +300,17 @@ export class Worker {
   /**
    * Process a single job: dispatch to the handler, then ack or fail.
    *
-   * Both the success ack and the failure report are retried on transient
-   * errors, since a lost ack leaves the job stuck in-flight permanently.
+   * Success acks are batched — the job ID is buffered and a flush is
+   * scheduled via `queueMicrotask`. This means the worker moves on to
+   * the next job immediately without waiting for the ack round-trip.
+   *
+   * Failures are reported individually (they carry per-job error details)
+   * and are retried on transient errors.
    */
   private async processJob(job: JobData): Promise<void> {
     try {
       await this.dispatch(job);
-      await this.withRetry(() => this.client.reportSuccess(job.id));
+      this.scheduleAck(job.id);
     } catch (err) {
       const failure: FailureOptions = {
         message: err instanceof Error ? err.message : String(err),
@@ -304,6 +319,36 @@ export class Worker {
       };
       await this.withRetry(() => this.client.reportFailure(job.id, failure));
     }
+  }
+
+  /**
+   * Buffer a success ack and schedule a flush.
+   *
+   * If a flush is already in flight, the ack simply accumulates in the
+   * buffer; it will be picked up when the current flush completes and
+   * schedules the next one.
+   */
+  private scheduleAck(id: string): void {
+    this.pendingAcks.push(id);
+    if (!this.ackFlushInFlight) {
+      this.ackFlushInFlight = true;
+      queueMicrotask(() => this.flushAcks());
+    }
+  }
+
+  /**
+   * Send all buffered acks in a single bulk request.
+   *
+   * After the request completes (or fails with retry), if more acks have
+   * accumulated during the flush, schedule another flush immediately.
+   */
+  private async flushAcks(): Promise<void> {
+    while (this.pendingAcks.length > 0) {
+      const batch = this.pendingAcks;
+      this.pendingAcks = [];
+      await this.withRetry(() => this.client.reportSuccessBulk(batch));
+    }
+    this.ackFlushInFlight = false;
   }
 
   /**
