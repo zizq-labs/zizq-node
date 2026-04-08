@@ -34,7 +34,7 @@
  * @module
  */
 
-import { Client as UndiciClient, type Dispatcher } from "undici";
+import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
 
 /** Lifecycle status of a job. */
@@ -404,9 +404,8 @@ export class Client {
 
   constructor(options: ClientOptions) {
     this.origin = options.url.replace(/\/+$/, "");
-    this.http = options.dispatcher ?? new UndiciClient(this.origin, {
+    this.http = options.dispatcher ?? new Pool(this.origin, {
       allowH2: true,
-      pipelining: 1,
     });
   }
 

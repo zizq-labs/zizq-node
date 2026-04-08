@@ -16,7 +16,7 @@
  *
  * @example Function-based worker
  * ```ts
- * import { Worker } from "@zizq-labs/zizq";
+ * import { Client, Worker } from "@zizq-labs/zizq";
  *
  * async function sendEmail(payload) { ... }
  * sendEmail.zizqOptions = { queue: "emails" };
@@ -24,8 +24,9 @@
  * async function generateReport(payload) { ... }
  * generateReport.zizqOptions = { queue: "reports" };
  *
+ * const client = new Client({ url: "http://localhost:7890" });
  * const worker = new Worker({
- *   url: "http://localhost:7890",
+ *   client,
  *   concurrency: 10,
  *   jobs: [sendEmail, generateReport],
  * });
@@ -36,8 +37,9 @@
  *
  * @example Handler-based worker (low-level / cross-language)
  * ```ts
+ * const client = new Client({ url: "http://localhost:7890" });
  * const worker = new Worker({
- *   url: "http://localhost:7890",
+ *   client,
  *   queues: ["payments"],
  *   concurrency: 5,
  *   handler: async (job) => {
@@ -69,7 +71,6 @@ import {
 } from "./client.ts";
 
 import type { JobFunction, JobHandler } from "./handler.ts";
-import type { Dispatcher } from "undici";
 
 /**
  * Options for constructing a {@link Worker}.
@@ -78,8 +79,8 @@ import type { Dispatcher } from "undici";
  * dispatch), but not both.
  */
 export interface WorkerOptions {
-  /** Base URL of the Zizq server, e.g. "http://localhost:7890". */
-  url: string;
+  /** Zizq client instance to use for all server communication. */
+  client: Client;
 
   /**
    * Maximum number of jobs to process concurrently.
@@ -135,9 +136,6 @@ export interface WorkerOptions {
    * Default: `console`.
    */
   logger?: Logger;
-
-  /** @internal For testing — override the HTTP dispatcher. */
-  dispatcher?: Dispatcher;
 }
 
 /** Minimal logger interface used by the worker. */
@@ -184,10 +182,7 @@ export class Worker {
       throw new Error("Provide either `jobs` or `handler`.");
     }
 
-    this.client = new Client({
-      url: options.url,
-      dispatcher: options.dispatcher,
-    });
+    this.client = options.client;
 
     this.concurrency = options.concurrency ?? 1;
     this.prefetch = options.prefetch ?? this.concurrency;
@@ -236,7 +231,7 @@ export class Worker {
    *
    * @example
    * ```ts
-   * const worker = new Worker({ url: "http://localhost:7890", jobs: [sendEmail] });
+   * const worker = new Worker({ client, jobs: [sendEmail] });
    *
    * // In another context (e.g. signal handler):
    * process.on("SIGTERM", () => worker.stop());
@@ -301,7 +296,7 @@ export class Worker {
    * Process a single job: dispatch to the handler, then ack or fail.
    *
    * Success acks are batched — the job ID is buffered and a flush is
-   * scheduled via `queueMicrotask`. This means the worker moves on to
+   * scheduled via `setImmediate`. This means the worker moves on to
    * the next job immediately without waiting for the ack round-trip.
    *
    * Failures are reported individually (they carry per-job error details)
@@ -332,7 +327,7 @@ export class Worker {
     this.pendingAcks.push(id);
     if (!this.ackFlushInFlight) {
       this.ackFlushInFlight = true;
-      queueMicrotask(() => this.flushAcks());
+      setImmediate(() => this.flushAcks());
     }
   }
 

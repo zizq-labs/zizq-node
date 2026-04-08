@@ -5,7 +5,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { Worker } from "./worker.ts";
 import type { JobFunction } from "./handler.ts";
-import { createMockContext, ndjsonBody, BASE_URL, type MockContext } from "./test-helpers.ts";
+import { createMockContext, ndjsonBody, type MockContext } from "./test-helpers.ts";
 
 describe("Worker", () => {
   let ctx: MockContext;
@@ -22,7 +22,7 @@ describe("Worker", () => {
     assert.throws(
       () =>
         new Worker({
-          url: BASE_URL,
+          client: ctx.client,
           jobs: [],
           handler: async () => {},
         }),
@@ -32,7 +32,7 @@ describe("Worker", () => {
 
   it("throws if neither jobs nor handler are provided", () => {
     assert.throws(
-      () => new Worker({ url: BASE_URL }),
+      () => new Worker({ client: ctx.client }),
       { message: "Provide either `jobs` or `handler`." }
     );
   });
@@ -70,9 +70,8 @@ describe("Worker", () => {
       .reply(204, "");
 
     const worker = new Worker({
-      url: BASE_URL,
+      client: ctx.client,
       jobs: [testJob],
-      dispatcher: ctx.mockPool,
     });
 
     await worker.run();
@@ -109,12 +108,11 @@ describe("Worker", () => {
       .reply(204, "");
 
     const worker = new Worker({
-      url: BASE_URL,
+      client: ctx.client,
       queues: ["q"],
       handler: async (job) => {
         processed.push(job.type);
       },
-      dispatcher: ctx.mockPool,
     });
 
     await worker.run();
@@ -156,9 +154,8 @@ describe("Worker", () => {
       });
 
     const worker = new Worker({
-      url: BASE_URL,
+      client: ctx.client,
       jobs: [failingJob],
-      dispatcher: ctx.mockPool,
       logger: { error() {} }, // suppress retry noise in test output
     });
 
