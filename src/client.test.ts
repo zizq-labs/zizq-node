@@ -3,7 +3,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { ZizqError, ClientError, ResponseError, Client } from "./client.ts";
+import { ZizqError, ClientError, ResponseError, Client, Job } from "./client.ts";
 import { createMockContext, msgpackBody, msgpackStreamBody, type MockContext } from "./test-helpers.ts";
 import { encode as msgpackEncode } from "@msgpack/msgpack";
 
@@ -290,7 +290,6 @@ describe("Client", () => {
           headers: { "content-type": "application/json" },
         });
 
-      const { Job } = await import("./resources.ts");
       const page = await ctx.client.listJobs();
       assert.ok(page.jobs[0] instanceof Job);
     });

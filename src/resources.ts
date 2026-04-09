@@ -18,6 +18,7 @@ import type {
   RetentionConfig,
   FailureOptions,
 } from "./client.ts";
+import { ErrorQuery, type ErrorQueryOptions } from "./error-query.ts";
 
 // --- JobData ---
 
@@ -182,6 +183,26 @@ export class Job {
     this.uniqueKey = data.uniqueKey;
     this.uniqueWhile = data.uniqueWhile;
     this.duplicate = data.duplicate;
+  }
+
+  /**
+   * Return a lazy async iterator over error records for this job.
+   *
+   * Supports chainable builder methods for configuring order, limit,
+   * and page size.
+   *
+   * @example
+   * ```ts
+   * for await (const error of job.errors()) {
+   *   console.log(`Attempt ${error.attempt}: ${error.message}`);
+   * }
+   *
+   * // Last 5 errors
+   * const recent = await job.errors({ order: "desc", limit: 5 }).toArray();
+   * ```
+   */
+  errors(options?: ErrorQueryOptions): ErrorQuery {
+    return new ErrorQuery(this.client, this.id, options);
   }
 
   /** Mark this job as successfully completed. */

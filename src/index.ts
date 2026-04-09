@@ -43,6 +43,9 @@ export type {
   ZizqOptions,
 } from "./handler.ts";
 
+export { ErrorQuery } from "./error-query.ts";
+export type { ErrorQueryOptions } from "./error-query.ts";
+
 export { enqueue, enqueueBulk } from "./enqueue.ts";
 
 export type { EnqueueInput } from "./enqueue.ts";
