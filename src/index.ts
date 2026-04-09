@@ -3,6 +3,7 @@
 
 export {
   Client,
+  Job,
   ZizqError,
   ConnectionError,
   ResponseError,

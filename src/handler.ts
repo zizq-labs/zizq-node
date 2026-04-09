@@ -13,10 +13,10 @@
 
 import type {
   BackoffConfig,
-  JobData,
   RetentionConfig,
   UniqueScope,
 } from "./client.ts";
+import type { Job } from "./job.ts";
 
 /**
  * Configuration that can be attached to a job function via `fn.zizqOptions`.
@@ -80,7 +80,7 @@ export interface ZizqOptions {
  * - Returning (or resolving) normally signals success.
  * - Throwing (or rejecting) signals failure.
  */
-export type JobHandler = (payload: unknown, job: JobData) => Promise<void> | void;
+export type JobHandler = (payload: unknown, job: Job) => Promise<void> | void;
 
 /**
  * A job handler function with optional Zizq configuration.

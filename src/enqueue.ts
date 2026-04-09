@@ -7,7 +7,7 @@ import {
   Client,
   type BackoffConfig,
   type EnqueueOptions,
-  type JobData,
+  Job,
   type RetentionConfig,
   type UniqueScope,
 } from "./client.ts";
@@ -126,7 +126,7 @@ export interface EnqueueInput {
 export async function enqueue(
   client: Client,
   input: EnqueueInput,
-): Promise<JobData> {
+): Promise<Job> {
   return client.enqueue(resolveInput(input));
 }
 
@@ -149,7 +149,7 @@ export async function enqueue(
 export async function enqueueBulk(
   client: Client,
   inputs: EnqueueInput[],
-): Promise<JobData[]> {
+): Promise<Job[]> {
   return client.enqueueBulk(inputs.map(resolveInput));
 }
 

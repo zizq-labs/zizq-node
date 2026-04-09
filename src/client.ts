@@ -37,6 +37,7 @@
 import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
+import { Job, type JobData } from "./job.ts";
 
 /** Lifecycle status of a job. */
 export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
@@ -44,87 +45,8 @@ export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dea
 /** Uniqueness scope for deduplication. */
 export type UniqueScope = "queued" | "active" | "exists";
 
-/** A job as returned by the Zizq server. */
-export interface JobData {
-  /** Unique job identifier. */
-  id: string;
-
-  /** Job type, e.g. "send_email". */
-  type: string;
-
-  /** Queue this job belongs to. */
-  queue: string;
-
-  /** Priority (lower number = higher priority). */
-  priority: number;
-
-  /** Lifecycle status. */
-  status: JobStatus;
-
-  /**
-   * Arbitrary payload provided by the enqueuer.
-   *
-   * Present on take/get, omitted on some responses where only job metadata
-   * is required.
-   */
-  payload?: unknown;
-
-  /** When the job becomes eligible to run (ms since Unix epoch). */
-  readyAt: number;
-
-  /** Number of times this job has been previously attempted. */
-  attempts: number;
-
-  /**
-   * Maximum retries before the job is killed.
-   *
-   * Absent means server default applies.
-   */
-  retryLimit?: number;
-
-  /**
-   * Per-job backoff configuration.
-   *
-   * Absent means server default applies.
-   */
-  backoff?: BackoffConfig;
-
-  /** When the job was last dequeued (ms since Unix epoch). */
-  dequeuedAt?: number;
-
-  /** When the job last failed (ms since Unix epoch). */
-  failedAt?: number;
-
-  /** When the job was completed (ms since Unix epoch). */
-  completedAt?: number;
-
-  /**
-   * Per-job retention configuration.
-   *
-   * Absent means server default.
-   */
-  retention?: RetentionConfig;
-
-  /** When the reaper will hard-delete this job (ms since Unix epoch). */
-  purgeAt?: number;
-
-  /**
-   * Unique key used for deduplication.
-   *
-   * Requires a pro license.
-   */
-  uniqueKey?: string;
-
-  /** Uniqueness scope. */
-  uniqueWhile?: UniqueScope;
-
-  /**
-   * True if this job was returned as a duplicate of an existing job.
-   *
-   * Present on enqueue responses only.
-   */
-  duplicate?: boolean;
-}
+// Re-export Job and JobData so consumers can import from client.ts.
+export { Job, type JobData } from "./job.ts";
 
 /**
  * Backoff configuration for retry delays.
@@ -521,9 +443,9 @@ export class Client {
    * });
    * ```
    */
-  async enqueue(options: EnqueueOptions): Promise<JobData> {
+  async enqueue(options: EnqueueOptions): Promise<Job> {
     const api = enqueueToApi(options);
-    return jobFromApi(await this.handleResponse(await this.post("/jobs", api)));
+    return this.wrapJob(await this.handleResponse(await this.post("/jobs", api)));
   }
 
   /**
@@ -539,10 +461,10 @@ export class Client {
    * ]);
    * ```
    */
-  async enqueueBulk(jobs: EnqueueOptions[]): Promise<JobData[]> {
+  async enqueueBulk(jobs: EnqueueOptions[]): Promise<Job[]> {
     const api = { jobs: jobs.map(enqueueToApi) };
     const data = await this.handleResponse(await this.post("/jobs/bulk", api)) as { jobs: unknown[] };
-    return data.jobs.map(jobFromApi);
+    return data.jobs.map((j) => this.wrapJob(j));
   }
 
   /**
@@ -585,9 +507,9 @@ export class Client {
    * @param options - Error details (message, stack trace, etc.).
    * @returns The updated job with its new status and attempt count.
    */
-  async reportFailure(id: string, options: FailureOptions): Promise<JobData> {
+  async reportFailure(id: string, options: FailureOptions): Promise<Job> {
     const api = failureToApi(options);
-    return jobFromApi(await this.handleResponse(await this.post(`/jobs/${id}/failure`, api)));
+    return this.wrapJob(await this.handleResponse(await this.post(`/jobs/${id}/failure`, api)));
   }
 
   /**
@@ -597,8 +519,8 @@ export class Client {
    * @returns The full job data including payload.
    * @throws {ZizqError} If the job is not found (404).
    */
-  async getJob(id: string): Promise<JobData> {
-    return jobFromApi(await this.handleResponse(await this.request("GET", `/jobs/${id}`)));
+  async getJob(id: string): Promise<Job> {
+    return this.wrapJob(await this.handleResponse(await this.request("GET", `/jobs/${id}`)));
   }
 
   /**
@@ -650,7 +572,7 @@ export class Client {
    * }
    * ```
    */
-  async take(options: TakeOptions = {}): Promise<AsyncGenerator<JobData>> {
+  async take(options: TakeOptions = {}): Promise<AsyncGenerator<Job>> {
     const params = new URLSearchParams();
     if (options.prefetch != null) {
       params.set("prefetch", String(options.prefetch));
@@ -685,7 +607,7 @@ export class Client {
   }
 
   /** Parse an NDJSON stream, yielding jobs. Empty lines are heartbeats. */
-  private async *iterateNdjson(body: Readable): AsyncGenerator<JobData> {
+  private async *iterateNdjson(body: Readable): AsyncGenerator<Job> {
     const decoder = new TextDecoder();
     let buffer = "";
 
@@ -700,7 +622,7 @@ export class Client {
 
           if (line.length === 0) continue;
 
-          yield jobFromApi(JSON.parse(line));
+          yield this.wrapJob(JSON.parse(line));
         }
       }
     } finally {
@@ -714,7 +636,7 @@ export class Client {
    * Frame format: [4-byte big-endian length][MessagePack payload].
    * A zero-length frame is a heartbeat and is silently skipped.
    */
-  private async *iterateMsgpackStream(body: Readable): AsyncGenerator<JobData> {
+  private async *iterateMsgpackStream(body: Readable): AsyncGenerator<Job> {
     let buffer = Buffer.alloc(0);
 
     try {
@@ -736,12 +658,17 @@ export class Client {
           const payload = buffer.subarray(4, 4 + frameLen);
           buffer = buffer.subarray(4 + frameLen);
 
-          yield jobFromApi(msgpackDecode(payload));
+          yield this.wrapJob(msgpackDecode(payload));
         }
       }
     } finally {
       body.destroy();
     }
+  }
+
+  /** Wrap raw API data as a Job instance. */
+  private wrapJob(raw: unknown): Job {
+    return new Job(this, jobFromApi(raw));
   }
 
   /**

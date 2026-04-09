@@ -65,7 +65,7 @@
 import {
   Client,
   ClientError,
-  type JobData,
+  Job,
   type TakeOptions,
   type FailureOptions,
 } from "./client.ts";
@@ -125,7 +125,7 @@ export interface WorkerOptions {
    *
    * Mutually exclusive with `jobs`.
    */
-  handler?: (job: JobData) => Promise<void> | void;
+  handler?: (job: Job) => Promise<void> | void;
 
   /**
    * Logger for worker diagnostics (retry warnings, unrecoverable errors).
@@ -206,7 +206,7 @@ export class Worker {
   private retryInitialDelay: number;
   private retryMaxDelay: number;
   private retryMultiplier: number;
-  private dispatch: (job: JobData) => Promise<void>;
+  private dispatch: (job: Job) => Promise<void>;
   private abortController: AbortController | null = null;
 
   // Bulk ack batching buffer.
@@ -253,7 +253,7 @@ export class Worker {
         handlers.set(typeName, fn);
       }
 
-      this.dispatch = async (job: JobData) => {
+      this.dispatch = async (job: Job) => {
         const handler = handlers.get(job.type);
 
         if (!handler) {
@@ -263,7 +263,7 @@ export class Worker {
         await handler(job.payload, job);
       };
     } else {
-      this.dispatch = async (job: JobData) => {
+      this.dispatch = async (job: Job) => {
         await options.handler!(job);
       };
     }
@@ -385,7 +385,7 @@ export class Worker {
    * Failures are reported individually (they carry per-job error details)
    * and are retried on transient errors.
    */
-  private async processJob(job: JobData): Promise<void> {
+  private async processJob(job: Job): Promise<void> {
     try {
       await this.dispatch(job);
       this.scheduleAck(job.id);
