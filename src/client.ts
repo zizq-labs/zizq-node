@@ -37,16 +37,19 @@
 import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
-import { Job, JobPage, type JobData } from "./resources.ts";
+import { Job, JobPage, ErrorRecord, ErrorPage, type JobData, type ErrorRecordData } from "./resources.ts";
 
 /** Lifecycle status of a job. */
 export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
+
+/** Sort direction for paginated listings. */
+export type SortDirection = "asc" | "desc";
 
 /** Uniqueness scope for deduplication. */
 export type UniqueScope = "queued" | "active" | "exists";
 
 // Re-export resource types so consumers can import from client.ts.
-export { Job, JobPage, type JobData } from "./resources.ts";
+export { Job, JobPage, ErrorRecord, ErrorPage, type JobData, type ErrorRecordData } from "./resources.ts";
 
 /**
  * Backoff configuration for retry delays.
@@ -241,7 +244,7 @@ export interface ListJobsOptions {
   from?: string;
 
   /** Sort order. Default: "asc" (oldest first). */
-  order?: "asc" | "desc";
+  order?: SortDirection;
 
   /** Maximum number of jobs per page (1–2000, default 50). */
   limit?: number;
@@ -260,6 +263,25 @@ export interface ListJobsOptions {
 
   /** jq expression to filter jobs by payload. */
   filter?: string;
+}
+
+/**
+ * Options for listing error records for a job.
+ *
+ * @example
+ * ```ts
+ * const page = await client.listErrors("job-id", { order: "desc", limit: 10 });
+ * ```
+ */
+export interface ListErrorsOptions {
+  /** Cursor: start after this attempt number (exclusive). */
+  from?: number;
+
+  /** Sort order. Default: "asc" (oldest first). */
+  order?: SortDirection;
+
+  /** Maximum number of error records per page (1–2000, default 50). */
+  limit?: number;
 }
 
 // --- API response shapes (used internally for type-safe casting) ---
@@ -284,6 +306,13 @@ interface VersionResponse {
 interface QueuesResponse {
   queues: string[];
 }
+
+/** Response shape for `GET /jobs/{id}/errors` */
+interface ListErrorsResponse {
+  errors: unknown[];
+  pages: { self?: string; next?: string; prev?: string };
+}
+
 
 /**
  * TLS configuration for connecting to the Zizq server over HTTPS.
@@ -659,6 +688,58 @@ export class Client {
   }
 
   /**
+   * List error records for a job with cursor-based pagination.
+   *
+   * @param id - The job ID to list errors for.
+   * @param options - Pagination and ordering options.
+   *
+   * @example
+   * ```ts
+   * const page = await client.listErrors("job-id", { order: "desc" });
+   * for (const error of page) {
+   *   console.log(`Attempt ${error.attempt}: ${error.message}`);
+   * }
+   * ```
+   */
+  async listErrors(id: string, options: ListErrorsOptions = {}): Promise<ErrorPage> {
+    const params = new URLSearchParams();
+    if (options.from != null) params.set("from", String(options.from));
+    if (options.order != null) params.set("order", options.order);
+    if (options.limit != null) params.set("limit", String(options.limit));
+
+    const qs = params.toString();
+    const path = `/jobs/${id}/errors${qs ? "?" + qs : ""}`;
+
+    return this.listErrorsByPath(path);
+  }
+
+  /**
+   * Fetch a page of errors by a raw path (used internally for pagination links).
+   *
+   * @internal
+   */
+  async listErrorsByPath(path: string): Promise<ErrorPage> {
+    const data = await this.handleResponse(await this.request("GET", path)) as ListErrorsResponse;
+    const errors = data.errors.map((e) => this.wrapError(e));
+    return new ErrorPage(this, errors, data.pages);
+  }
+
+  /**
+   * Fetch a single error record for a job by attempt number.
+   *
+   * @param id - The job ID.
+   * @param attempt - The attempt number (1-based).
+   * @returns The error record for that attempt.
+   * @throws {NotFoundError} If the job or attempt is not found.
+   */
+  async getError(id: string, attempt: number): Promise<ErrorRecord> {
+    const raw = await this.handleResponse(
+      await this.request("GET", `/jobs/${id}/errors/${attempt}`)
+    );
+    return this.wrapError(raw);
+  }
+
+  /**
    * Connect to the streaming take endpoint and return an async generator
    * of jobs.
    *
@@ -775,6 +856,11 @@ export class Client {
   /** Wrap raw API data as a Job instance. */
   private wrapJob(raw: unknown): Job {
     return new Job(this, jobFromApi(raw));
+  }
+
+  /** Wrap raw API data as an ErrorRecord instance. */
+  private wrapError(raw: unknown): ErrorRecord {
+    return new ErrorRecord(errorFromApi(raw));
   }
 
   /**
@@ -988,6 +1074,19 @@ function retentionFromApi(raw: unknown): RetentionConfig {
 }
 
 /** Build the appropriate ResponseError subclass for an HTTP status code. */
+/** Convert an API-format error record to camelCase. */
+function errorFromApi(raw: unknown): ErrorRecordData {
+  const r = raw as Record<string, unknown>;
+  return stripUndefined({
+    attempt: r.attempt,
+    message: r.message,
+    errorType: r.error_type,
+    backtrace: r.backtrace,
+    dequeuedAt: r.dequeued_at,
+    failedAt: r.failed_at,
+  }) as unknown as ErrorRecordData;
+}
+
 function buildResponseError(status: number, body: unknown): ResponseError {
   const message = (body as { error?: string } | undefined)?.error ?? `HTTP ${status}`;
   if (status === 404) return new NotFoundError(message, body);

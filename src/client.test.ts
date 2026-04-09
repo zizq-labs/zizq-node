@@ -296,6 +296,124 @@ describe("Client", () => {
     });
   });
 
+  describe("listErrors", () => {
+    it("returns a page of error records", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/errors", method: "GET" })
+        .reply(200, {
+          errors: [
+            { attempt: 1, message: "timeout", error_type: "TimeoutError", dequeued_at: 1000, failed_at: 2000 },
+            { attempt: 2, message: "refused", dequeued_at: 3000, failed_at: 4000 },
+          ],
+          pages: { self: "/jobs/j1/errors" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page = await ctx.client.listErrors("j1");
+
+      assert.equal(page.errors.length, 2);
+      assert.equal(page.errors[0].attempt, 1);
+      assert.equal(page.errors[0].message, "timeout");
+      assert.equal(page.errors[0].errorType, "TimeoutError");
+      assert.equal(page.errors[0].dequeuedAt, 1000);
+      assert.equal(page.errors[1].attempt, 2);
+      assert.equal(page.errors[1].errorType, undefined);
+    });
+
+    it("follows nextPage link", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/errors?limit=1", method: "GET" })
+        .reply(200, {
+          errors: [
+            { attempt: 1, message: "first", dequeued_at: 1000, failed_at: 2000 },
+          ],
+          pages: {
+            self: "/jobs/j1/errors?limit=1",
+            next: "/jobs/j1/errors?limit=1&from=1",
+          },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/errors?limit=1&from=1", method: "GET" })
+        .reply(200, {
+          errors: [
+            { attempt: 2, message: "second", dequeued_at: 3000, failed_at: 4000 },
+          ],
+          pages: { self: "/jobs/j1/errors?limit=1&from=1" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page1 = await ctx.client.listErrors("j1", { limit: 1 });
+      assert.equal(page1.errors[0].message, "first");
+      assert.ok(page1.hasNext);
+
+      const page2 = await page1.nextPage();
+      assert.ok(page2);
+      assert.equal(page2!.errors[0].message, "second");
+      assert.ok(!page2!.hasNext);
+    });
+
+    it("is iterable", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/errors", method: "GET" })
+        .reply(200, {
+          errors: [
+            { attempt: 1, message: "a", dequeued_at: 1000, failed_at: 2000 },
+            { attempt: 2, message: "b", dequeued_at: 3000, failed_at: 4000 },
+          ],
+          pages: { self: "/jobs/j1/errors" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page = await ctx.client.listErrors("j1");
+      const messages = [...page].map(e => e.message);
+      assert.deepEqual(messages, ["a", "b"]);
+    });
+
+    it("fetches a single error by attempt", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/errors/2", method: "GET" })
+        .reply(200, {
+          attempt: 2,
+          message: "connection refused",
+          error_type: "ConnectionError",
+          backtrace: "at line 42",
+          dequeued_at: 3000,
+          failed_at: 4000,
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const error = await ctx.client.getError("j1", 2);
+
+      assert.equal(error.attempt, 2);
+      assert.equal(error.message, "connection refused");
+      assert.equal(error.errorType, "ConnectionError");
+      assert.equal(error.backtrace, "at line 42");
+      assert.equal(error.dequeuedAt, 3000);
+      assert.equal(error.failedAt, 4000);
+    });
+
+    it("passes order and from params", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/errors?from=2&order=desc&limit=5", method: "GET" })
+        .reply(200, {
+          errors: [],
+          pages: { self: "/jobs/j1/errors?from=2&order=desc&limit=5" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page = await ctx.client.listErrors("j1", { from: 2, order: "desc", limit: 5 });
+      assert.equal(page.errors.length, 0);
+    });
+  });
+
   describe("msgpack format", () => {
     let msgCtx: MockContext;
 

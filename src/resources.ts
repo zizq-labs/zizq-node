@@ -291,3 +291,112 @@ export class JobPage {
     return this.client.listJobsByPath(this.prevUrl);
   }
 }
+
+// --- ErrorRecord ---
+
+/** Raw error record data (camelCase). */
+export interface ErrorRecordData {
+  /** Which attempt this error corresponds to (1-based). */
+  attempt: number;
+  /** Error message from the worker. */
+  message: string;
+  /** Error class, e.g. "TimeoutError". */
+  errorType?: string;
+  /** Stack trace / backtrace. */
+  backtrace?: string;
+  /** When the job was dequeued for this attempt (ms since Unix epoch). */
+  dequeuedAt: number;
+  /** When the job failed (ms since Unix epoch). */
+  failedAt: number;
+}
+
+/**
+ * An error record for a failed job attempt.
+ */
+export class ErrorRecord {
+  /** Which attempt this error corresponds to (1-based). */
+  readonly attempt: number;
+  /** Error message from the worker. */
+  readonly message: string;
+  /** Error class, e.g. "TimeoutError". */
+  readonly errorType?: string;
+  /** Stack trace / backtrace. */
+  readonly backtrace?: string;
+  /** When the job was dequeued for this attempt (ms since Unix epoch). */
+  readonly dequeuedAt: number;
+  /** When the job failed (ms since Unix epoch). */
+  readonly failedAt: number;
+
+  /** @internal */
+  constructor(data: ErrorRecordData) {
+    this.attempt = data.attempt;
+    this.message = data.message;
+    this.errorType = data.errorType;
+    this.backtrace = data.backtrace;
+    this.dequeuedAt = data.dequeuedAt;
+    this.failedAt = data.failedAt;
+  }
+}
+
+// --- ErrorPage ---
+
+/**
+ * A page of error records returned by `Client.listErrors()`.
+ *
+ * @example
+ * ```ts
+ * let page = await client.listErrors("job-id");
+ *
+ * for (const error of page) {
+ *   console.log(`Attempt ${error.attempt}: ${error.message}`);
+ * }
+ * ```
+ */
+export class ErrorPage {
+  /** The error records on this page. */
+  readonly errors: ErrorRecord[];
+
+  /** @internal */
+  private client: Client;
+  private nextUrl: string | null;
+  private prevUrl: string | null;
+
+  /** @internal */
+  constructor(client: Client, errors: ErrorRecord[], pages: { next?: string | null; prev?: string | null }) {
+    this.client = client;
+    this.errors = errors;
+    this.nextUrl = pages.next ?? null;
+    this.prevUrl = pages.prev ?? null;
+  }
+
+  /** Whether there is a next page. */
+  get hasNext(): boolean {
+    return this.nextUrl !== null;
+  }
+
+  /** Whether there is a previous page. */
+  get hasPrev(): boolean {
+    return this.prevUrl !== null;
+  }
+
+  /** Iterate over the error records on this page. */
+  [Symbol.iterator](): IterableIterator<ErrorRecord> {
+    return this.errors[Symbol.iterator]();
+  }
+
+  /**
+   * Fetch the next page, or `null` if this is the last page.
+   */
+  async nextPage(): Promise<ErrorPage | null> {
+    if (!this.nextUrl) return null;
+    return this.client.listErrorsByPath(this.nextUrl);
+  }
+
+  /**
+   * Fetch the previous page, or `null` if this is the first page.
+   */
+  async prevPage(): Promise<ErrorPage | null> {
+    if (!this.prevUrl) return null;
+    return this.client.listErrorsByPath(this.prevUrl);
+  }
+}
