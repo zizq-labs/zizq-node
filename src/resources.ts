@@ -17,6 +17,7 @@ import type {
   BackoffConfig,
   RetentionConfig,
   FailureOptions,
+  UpdateJobOptions,
 } from "./client.ts";
 import { ErrorQuery, type ErrorQueryOptions } from "./error-query.ts";
 
@@ -225,6 +226,16 @@ export class Job {
     return this.client.deleteJob(this.id);
   }
 
+  /**
+   * Update this job's mutable fields.
+   *
+   * @param options - Fields to update. See `UpdateJobOptions` for null/undefined semantics.
+   * @returns The updated job.
+   */
+  async update(options: UpdateJobOptions): Promise<Job> {
+    return this.client.updateJob(this.id, options);
+  }
+
   /** Return the raw job data as a plain object. */
   toJSON(): JobData {
     return {
@@ -309,7 +320,19 @@ export class JobPage {
   async deleteAll(): Promise<number> {
     const ids = this.jobs.map((j) => j.id);
     if (ids.length === 0) return 0;
-    return this.client.deleteAllJobs({ id: ids });
+    return this.client.deleteAllJobs({ where: { id: ids } });
+  }
+
+  /**
+   * Update all jobs on this page.
+   *
+   * @param apply - Fields to update. See `UpdateJobOptions` for null/undefined semantics.
+   * @returns The number of updated jobs.
+   */
+  async updateAll(apply: UpdateJobOptions): Promise<number> {
+    const ids = this.jobs.map((j) => j.id);
+    if (ids.length === 0) return 0;
+    return this.client.updateAllJobs({ where: { id: ids }, apply });
   }
 
   /**

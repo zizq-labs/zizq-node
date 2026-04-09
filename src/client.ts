@@ -80,11 +80,11 @@ export interface BackoffConfig {
  * The terminal statuses are "completed" and "dead".
  */
 export interface RetentionConfig {
-  /** How long completed jobs remain visible (ms). */
-  completedMs?: number;
+  /** How long completed jobs remain visible (ms). `null` clears to server default. */
+  completedMs?: number | null;
 
-  /** How long dead jobs remain visible (ms). */
-  deadMs?: number;
+  /** How long dead jobs remain visible (ms). `null` clears to server default. */
+  deadMs?: number | null;
 }
 
 /**
@@ -285,17 +285,80 @@ export interface ListErrorsOptions {
 }
 
 /**
- * Filter options for bulk-deleting jobs.
+ * Mutable fields for updating a job.
  *
- * An empty options object deletes all jobs.
+ * Field semantics:
+ * - **omitted or `undefined`** — leave unchanged
+ * - **`null`** — clear the field (only valid for nullable fields)
+ * - **a value** — update to that value
+ *
+ * Nullable fields: `readyAt`, `retryLimit`, `backoff`, `retention`.
+ * Non-nullable fields: `queue`, `priority`.
  *
  * @example
  * ```ts
- * // Delete all dead jobs in the emails queue
- * const count = await client.deleteAllJobs({ queue: "emails", status: "dead" });
+ * // Change priority and clear retry limit (use server default)
+ * await client.updateJob("job-id", {
+ *   priority: 100,
+ *   retryLimit: null,
+ * });
  * ```
  */
-export interface DeleteJobsOptions {
+export interface UpdateJobOptions {
+  /** Move the job to a different queue. */
+  queue?: string;
+
+  /** Change the job's priority. */
+  priority?: number;
+
+  /** Change when the job becomes ready (ms since epoch). `null` clears to immediately ready. */
+  readyAt?: number | null;
+
+  /** Override the retry limit. `null` clears to server default. */
+  retryLimit?: number | null;
+
+  /** Override the backoff config. `null` clears to server default. */
+  backoff?: BackoffConfig | null;
+
+  /** Override the retention config. `null` clears to server default. */
+  retention?: RetentionConfig | null;
+}
+
+/**
+ * Options for bulk-updating jobs.
+ *
+ * Has two parts:
+ * - `where` — filter selecting which jobs to update (same as `deleteAllJobs`)
+ * - `apply` — fields to update on the matching jobs (same as `updateJob`)
+ *
+ * An empty array filter (e.g. `where.id: []`) short-circuits to 0 jobs updated.
+ *
+ * @example
+ * ```ts
+ * // Lower the priority of all dead jobs in the emails queue
+ * const count = await client.updateAllJobs({
+ *   where: { queue: "emails", status: "dead" },
+ *   apply: { priority: 1000 },
+ * });
+ * ```
+ */
+export interface UpdateAllJobsOptions {
+  /** Filter selecting which jobs to update. */
+  where?: JobFilter;
+
+  /** Fields to update on the matching jobs. */
+  apply: UpdateJobOptions;
+}
+
+/**
+ * Filter for selecting jobs in bulk operations.
+ *
+ * Used by `deleteAllJobs` and `updateAllJobs` to scope which jobs are
+ * affected. An empty filter selects all jobs.
+ *
+ * Multi-value fields accept either a single value or an array.
+ */
+export interface JobFilter {
   /** Filter by job ID. Accepts a single value or an array. */
   id?: string | string[];
 
@@ -310,6 +373,24 @@ export interface DeleteJobsOptions {
 
   /** jq expression to filter jobs by payload. */
   filter?: string;
+}
+
+/**
+ * Options for bulk-deleting jobs.
+ *
+ * An empty `where` filter deletes all jobs.
+ *
+ * @example
+ * ```ts
+ * // Delete all dead jobs in the emails queue
+ * const count = await client.deleteAllJobs({
+ *   where: { queue: "emails", status: "dead" },
+ * });
+ * ```
+ */
+export interface DeleteAllJobsOptions {
+  /** Filter selecting which jobs to delete. */
+  where?: JobFilter;
 }
 
 // --- API response shapes (used internally for type-safe casting) ---
@@ -338,6 +419,11 @@ interface QueuesResponse {
 /** Response shape for `DELETE /jobs`. */
 interface DeleteJobsResponse {
   deleted: number;
+}
+
+/** Response shape for `PATCH /jobs`. */
+interface PatchJobsResponse {
+  patched: number;
 }
 
 /** Response shape for `GET /jobs/{id}/errors` */
@@ -671,14 +757,18 @@ export class Client {
    * const count = await client.deleteAllJobs({ queue: "emails", status: "dead" });
    * ```
    */
-  async deleteAllJobs(options: DeleteJobsOptions = {}): Promise<number> {
+  async deleteAllJobs(options: DeleteAllJobsOptions = {}): Promise<number> {
+    assertOnlyKeys("deleteAllJobs", options, ["where"]);
+    const where = options.where ?? {};
+    assertOnlyKeys("deleteAllJobs.where", where, ["id", "status", "queue", "type", "filter"]);
+
     // Build the multi-value filters first so we can short-circuit if any
     // resolves to an empty string. An empty filter matches nothing — we
     // don't want to pass it as "no filter" and accidentally delete everything.
-    const id = options.id != null ? toCommaList(options.id) : undefined;
-    const status = options.status != null ? toCommaList(options.status) : undefined;
-    const queue = options.queue != null ? toCommaList(options.queue) : undefined;
-    const type = options.type != null ? toCommaList(options.type) : undefined;
+    const id = where.id != null ? toCommaList(where.id) : undefined;
+    const status = where.status != null ? toCommaList(where.status) : undefined;
+    const queue = where.queue != null ? toCommaList(where.queue) : undefined;
+    const type = where.type != null ? toCommaList(where.type) : undefined;
 
     if (id === "" || status === "" || queue === "" || type === "") return 0;
 
@@ -687,7 +777,7 @@ export class Client {
     if (status != null) params.set("status", status);
     if (queue != null) params.set("queue", queue);
     if (type != null) params.set("type", type);
-    if (options.filter != null) params.set("filter", options.filter);
+    if (where.filter != null) params.set("filter", where.filter);
 
     const qs = params.toString();
     const path = `/jobs${qs ? "?" + qs : ""}`;
@@ -697,6 +787,79 @@ export class Client {
     ) as DeleteJobsResponse;
 
     return data.deleted;
+  }
+
+  /**
+   * Update a single job's mutable fields.
+   *
+   * Field semantics:
+   * - **omitted or `undefined`** — leave unchanged
+   * - **`null`** — clear the field (only valid for nullable fields)
+   * - **a value** — update to that value
+   *
+   * @param id - The job ID to update.
+   * @param options - Fields to update.
+   * @returns The updated job.
+   * @throws {NotFoundError} If the job is not found.
+   *
+   * @example
+   * ```ts
+   * // Change priority and clear the retry limit
+   * await client.updateJob("job-id", {
+   *   priority: 100,
+   *   retryLimit: null,
+   * });
+   * ```
+   */
+  async updateJob(id: string, options: UpdateJobOptions): Promise<Job> {
+    const api = updateToApi(options);
+    return this.wrapJob(
+      await this.handleResponse(await this.patch(`/jobs/${encodeURIComponent(id)}`, api))
+    );
+  }
+
+  /**
+   * Bulk update jobs matching a filter.
+   *
+   * @returns The number of updated jobs.
+   *
+   * @example
+   * ```ts
+   * const count = await client.updateAllJobs({
+   *   where: { queue: "emails", status: "ready" },
+   *   apply: { priority: 1000 },
+   * });
+   * ```
+   */
+  async updateAllJobs(options: UpdateAllJobsOptions): Promise<number> {
+    assertOnlyKeys("updateAllJobs", options, ["where", "apply"]);
+    const where = options.where ?? {};
+    assertOnlyKeys("updateAllJobs.where", where, ["id", "status", "queue", "type", "filter"]);
+
+    // Same empty-filter short-circuit as deleteAllJobs.
+    const id = where.id != null ? toCommaList(where.id) : undefined;
+    const status = where.status != null ? toCommaList(where.status) : undefined;
+    const queue = where.queue != null ? toCommaList(where.queue) : undefined;
+    const type = where.type != null ? toCommaList(where.type) : undefined;
+
+    if (id === "" || status === "" || queue === "" || type === "") return 0;
+
+    const params = new URLSearchParams();
+    if (id != null) params.set("id", id);
+    if (status != null) params.set("status", status);
+    if (queue != null) params.set("queue", queue);
+    if (type != null) params.set("type", type);
+    if (where.filter != null) params.set("filter", where.filter);
+
+    const qs = params.toString();
+    const path = `/jobs${qs ? "?" + qs : ""}`;
+
+    const api = updateToApi(options.apply);
+    const data = await this.handleResponse(
+      await this.patch(path, api)
+    ) as PatchJobsResponse;
+
+    return data.patched;
   }
 
   /**
@@ -991,9 +1154,21 @@ export class Client {
   }
 
   private async post(path: string, body: unknown): Promise<Dispatcher.ResponseData> {
+    return this.requestWithBody("POST", path, body);
+  }
+
+  private async patch(path: string, body: unknown): Promise<Dispatcher.ResponseData> {
+    return this.requestWithBody("PATCH", path, body);
+  }
+
+  private async requestWithBody(
+    method: "POST" | "PATCH",
+    path: string,
+    body: unknown
+  ): Promise<Dispatcher.ResponseData> {
     try {
       return await this.http.request({
-        method: "POST",
+        method,
         path,
         headers: {
           "content-type": this.contentType,
@@ -1069,6 +1244,27 @@ function toCommaList(value: string | string[]): string {
   return Array.isArray(value) ? value.join(",") : value;
 }
 
+/**
+ * Throw if `obj` contains keys not in the allowed list.
+ *
+ * Catches typos and structural mistakes in options objects (e.g. passing
+ * `{ status: "ready" }` to `deleteAllJobs` instead of `{ where: { status: "ready" } }`)
+ * which would otherwise silently delete or update everything.
+ */
+function assertOnlyKeys(
+  context: string,
+  obj: object,
+  allowed: string[]
+): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowed.includes(key)) {
+      throw new Error(
+        `${context}: unknown option "${key}". Allowed: ${allowed.join(", ")}`
+      );
+    }
+  }
+}
+
 /** Strip keys whose value is `undefined` from an object (in place). */
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
   for (const k in obj) if (obj[k] === undefined) delete obj[k];
@@ -1088,6 +1284,24 @@ function enqueueToApi(opts: EnqueueOptions): Record<string, unknown> {
     retention: opts.retention && retentionToApi(opts.retention),
     unique_key: opts.uniqueKey,
     unique_while: opts.uniqueWhile,
+  });
+}
+
+/**
+ * Convert an UpdateJobOptions to the server's snake_case patch format.
+ *
+ * `undefined` values are stripped (leave field unchanged), `null` values
+ * are preserved (clear field on the server). Nested backoff and retention
+ * objects are translated when present, passed through as `null` when null.
+ */
+function updateToApi(opts: UpdateJobOptions): Record<string, unknown> {
+  return stripUndefined({
+    queue: opts.queue,
+    priority: opts.priority,
+    ready_at: opts.readyAt,
+    retry_limit: opts.retryLimit,
+    backoff: opts.backoff && backoffToApi(opts.backoff),
+    retention: opts.retention && retentionToApi(opts.retention),
   });
 }
 

@@ -40,6 +40,8 @@ const client = new Client({url: URL, format: FORMAT, tls: TLS});
 
 // --- Enqueue Phase ---
 
+await client.deleteAllJobs({ where: { queue: "node/bench" } });
+
 const enqueueStart = performance.now();
 
 for (let n = 1; n <= JOB_COUNT; n += 1000) {

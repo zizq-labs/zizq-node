@@ -231,7 +231,9 @@ describe("Client", () => {
           headers: { "content-type": "application/json" },
         });
 
-      const count = await ctx.client.deleteAllJobs({ queue: "emails", status: "dead" });
+      const count = await ctx.client.deleteAllJobs({
+        where: { queue: "emails", status: "dead" },
+      });
       assert.equal(count, 5);
     });
 
@@ -248,7 +250,7 @@ describe("Client", () => {
 
     it("short-circuits on empty array filter without making a request", async () => {
       // No mock — if a request was made, undici would error.
-      const count = await ctx.client.deleteAllJobs({ id: [] });
+      const count = await ctx.client.deleteAllJobs({ where: { id: [] } });
       assert.equal(count, 0);
     });
 
@@ -259,8 +261,127 @@ describe("Client", () => {
           headers: { "content-type": "application/json" },
         });
 
-      const count = await ctx.client.deleteAllJobs({ id: "j1" });
+      const count = await ctx.client.deleteAllJobs({ where: { id: "j1" } });
       assert.equal(count, 1);
+    });
+
+    it("throws on unknown top-level option (catches missing where wrapper)", async () => {
+      // No mock — if a request was made, this test would fail differently.
+      await assert.rejects(
+        // @ts-expect-error — intentionally passing wrong shape
+        () => ctx.client.deleteAllJobs({ status: "dead" }),
+        /unknown option "status"/,
+      );
+    });
+  });
+
+  describe("updateJob", () => {
+    it("patches a job and returns the updated job", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1",
+          method: "PATCH",
+        })
+        .reply(200, {
+          id: "j1",
+          type: "test",
+          queue: "emails",
+          priority: 100,
+          status: "ready",
+          ready_at: 1000,
+          attempts: 0,
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const job = await ctx.client.updateJob("j1", { priority: 100 });
+      assert.equal(job.priority, 100);
+    });
+
+    it("preserves null values to clear fields", async () => {
+      let capturedBody: string | undefined;
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1",
+          method: "PATCH",
+          body: (body) => {
+            capturedBody = body;
+            return true;
+          },
+        })
+        .reply(200, {
+          id: "j1",
+          type: "test",
+          queue: "q",
+          priority: 0,
+          status: "ready",
+          ready_at: 1000,
+          attempts: 0,
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      await ctx.client.updateJob("j1", { retryLimit: null });
+      assert.ok(capturedBody);
+      const parsed = JSON.parse(capturedBody!);
+      assert.equal(parsed.retry_limit, null);
+      assert.ok(!("queue" in parsed)); // omitted
+    });
+
+    it("strips undefined values", async () => {
+      let capturedBody: string | undefined;
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1",
+          method: "PATCH",
+          body: (body) => {
+            capturedBody = body;
+            return true;
+          },
+        })
+        .reply(200, {
+          id: "j1",
+          type: "test",
+          queue: "q",
+          priority: 0,
+          status: "ready",
+          ready_at: 1000,
+          attempts: 0,
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      await ctx.client.updateJob("j1", { priority: 100, queue: undefined });
+      const parsed = JSON.parse(capturedBody!);
+      assert.equal(parsed.priority, 100);
+      assert.ok(!("queue" in parsed));
+    });
+  });
+
+  describe("updateAllJobs", () => {
+    it("patches matching jobs and returns count", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs?queue=emails",
+          method: "PATCH",
+        })
+        .reply(200, { patched: 5 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.updateAllJobs({
+        where: { queue: "emails" },
+        apply: { priority: 1000 },
+      });
+      assert.equal(count, 5);
+    });
+
+    it("short-circuits on empty array filter", async () => {
+      const count = await ctx.client.updateAllJobs({
+        where: { id: [] },
+        apply: { priority: 1 },
+      });
+      assert.equal(count, 0);
     });
   });
 
