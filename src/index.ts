@@ -41,6 +41,8 @@ export { Worker } from "./worker.ts";
 
 export type { WorkerOptions, Logger, RequestRetryOptions } from "./worker.ts";
 
+export { buildHandler } from "./handler.ts";
+
 export type {
   JobFunction,
   JobHandler,

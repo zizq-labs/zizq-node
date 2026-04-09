@@ -4,9 +4,10 @@
 /**
  * Job handler types and configuration.
  *
- * These types define how job functions are structured and configured. They
- * are used both at enqueue time (to read defaults from `zizqOptions`) and
- * at worker registration time (to build the dispatch table).
+ * These types define how handlers and job functions are structured and
+ * configured. They are used both at enqueue time (to read defaults fro
+ * `zizqOptions`) and when building a handler for the worker (to build the
+ * dispatch table).
  *
  * @module
  */
@@ -16,13 +17,14 @@ import type {
   RetentionConfig,
   UniqueScope,
 } from "./client.ts";
+
 import type { Job } from "./resources.ts";
 
 /**
  * Configuration that can be attached to a job function via `fn.zizqOptions`.
  *
  * These options provide defaults when the function is used with `enqueue()`
- * or registered with a `Worker`. All fields are optional.
+ * or registered with `buildHandler()`. All fields are optional.
  *
  * @example
  * ```ts
@@ -72,31 +74,97 @@ export interface ZizqOptions {
 }
 
 /**
- * A function that processes a job's payload.
+ * Top-level function that processes a single job dispatched by the worker.
  *
- * Receives the payload as the first argument and the full job data as the
- * second (for access to metadata like `id`, `type`, `attempts`, etc.).
+ * Receives the full job, with `job.payload` for the user-supplied payload
+ * and metadata like `job.id`, `job.type`, `job.attempts`, etc.
+ *
+ * This would typically be implemented with an internal lookup table or switch
+ * statement based on the queue/type.
  *
  * - Returning (or resolving) normally signals success.
  * - Throwing (or rejecting) signals failure.
  */
-export type JobHandler = (payload: unknown, job: Job) => Promise<void> | void;
+export type JobHandler = (job: Job) => Promise<void> | void;
 
 /**
- * A job handler function with optional Zizq configuration.
+ * A user-defined job function.
  *
- * This is the type expected by the `jobs` array in `WorkerOptions` and
- * by the `enqueue()` helper. Attach configuration via the `zizqOptions`
- * property.
+ * Use the `job` argument to access metadata like `id`, `type`, or `attempts`.
  *
- * @example
+ * The worker always passes both `payload` and `job`, but most handlers
+ * likely only declare `payload` unless they explicitly need full access to the
+ * job.
+ *
+ * Most handlers only need the payload:
+ *
  * ```ts
  * const sendEmail: JobFunction = async (payload) => {
  *   await mailer.send(payload.to, payload.subject);
  * };
  * sendEmail.zizqOptions = { queue: "emails" };
  * ```
+ *
+ * Handlers that need job metadata can take both:
+ *
+ * ```ts
+ * const retryWithBackoff: JobFunction = async (payload, job) => {
+ *   if (job.attempts > 3) { ... }
+ * };
+ * ```
+ *
+ * Use `buildHandler([...])` to wrap an array of `JobFunction`s
+ * into a single `JobHandler` for the `Worker`.
  */
-export interface JobFunction extends JobHandler {
+export interface JobFunction {
+  (payload: unknown, job: Job): Promise<void> | void;
   zizqOptions?: ZizqOptions;
+}
+
+/**
+ * Build a `JobHandler` that dispatches incoming jobs to the matching
+ * function from an array, looking up by `zizqOptions.type` (or `.name`).
+ *
+ * Works with plain JS functions, named functions, and `JobFunction`s with
+ * attached `zizqOptions`. Each function is called with `(payload, job)`.
+ *
+ * @example
+ * ```ts
+ * import { Worker, buildHandler } from "@zizq-labs/zizq";
+ *
+ * async function sendEmail(payload) { ... }
+ * sendEmail.zizqOptions = { queue: "emails" };
+ *
+ * const worker = new Worker({
+ *   client,
+ *   handler: buildHandler([sendEmail, generateReport]),
+ * });
+ * ```
+ *
+ * @throws If any function lacks a name or `zizqOptions.type`, or if two
+ *   functions resolve to the same type.
+ */
+export function buildHandler(jobs: JobFunction[]): JobHandler {
+  const handlers = new Map<string, JobFunction>();
+
+  for (const fn of jobs) {
+    const typeName = fn.zizqOptions?.type ?? fn.name;
+    if (!typeName) {
+      throw new Error(
+        "Job function must have a name or zizqOptions.type"
+      );
+    }
+    if (handlers.has(typeName)) {
+      throw new Error(`Duplicate job type registered: "${typeName}"`);
+    }
+    handlers.set(typeName, fn);
+  }
+
+  return async (job) => {
+    const fn = handlers.get(job.type);
+    if (!fn) {
+      throw new Error(`No handler registered for job type: ${job.type}`);
+    }
+    await fn(job.payload, job);
+  };
 }

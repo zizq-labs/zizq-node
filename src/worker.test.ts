@@ -4,7 +4,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { Worker } from "./worker.ts";
-import type { JobFunction } from "./handler.ts";
+import { buildHandler, type JobFunction } from "./handler.ts";
 import { createMockContext, ndjsonBody, type MockContext } from "./test-helpers.ts";
 
 describe("Worker", () => {
@@ -18,26 +18,7 @@ describe("Worker", () => {
     await ctx.mockAgent.close();
   });
 
-  it("throws if both jobs and handler are provided", () => {
-    assert.throws(
-      () =>
-        new Worker({
-          client: ctx.client,
-          jobs: [],
-          handler: async () => {},
-        }),
-      { message: "Provide either `jobs` or `handler`, not both." }
-    );
-  });
-
-  it("throws if neither jobs nor handler are provided", () => {
-    assert.throws(
-      () => new Worker({ client: ctx.client }),
-      { message: "Provide either `jobs` or `handler`." }
-    );
-  });
-
-  it("dispatches to registered job functions", async () => {
+  it("dispatches via buildHandler", async () => {
     const processed: unknown[] = [];
     let worker: Worker;
 
@@ -73,7 +54,7 @@ describe("Worker", () => {
 
     worker = new Worker({
       client: ctx.client,
-      jobs: [testJob],
+      handler: buildHandler([testJob]),
       logger: { info() {}, error() {} },
     });
 
@@ -164,7 +145,7 @@ describe("Worker", () => {
 
     worker = new Worker({
       client: ctx.client,
-      jobs: [failingJob],
+      handler: buildHandler([failingJob]),
       logger: { info() {}, error() {} },
     });
 

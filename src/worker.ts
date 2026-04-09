@@ -2,21 +2,16 @@
 // Licensed under the MIT License. See LICENSE file for details.
 
 /**
- * In-process worker that takes jobs from the Zizq server and dispatches them.
+ * In-process worker that takes jobs from the Zizq server and dispatches
+ * them to a single handler function.
  *
- * Supports two mutually exclusive modes:
+ * The handler can either route jobs manually (e.g. via a `switch` on
+ * `job.type`) or use `buildHandler([...])` to build a dispatcher
+ * from an array of named `JobFunction`s.
  *
- * - **Function-based**: pass an array of named functions via `jobs`. The worker
- *   builds a dispatch table from each function's name (or `zizqOptions.type`)
- *   and automatically routes incoming jobs to the correct handler.
- *
- * - **Handler-based**: pass a single function via `handler`. The worker calls
- *   it for every job, leaving dispatch to the caller (e.g. via a `switch` on
- *   `job.type`).
- *
- * @example Function-based worker
+ * @example Function-based dispatch
  * ```ts
- * import { Client, Worker } from "@zizq-labs/zizq";
+ * import { Client, Worker, buildHandler } from "@zizq-labs/zizq";
  *
  * async function sendEmail(payload) { ... }
  * sendEmail.zizqOptions = { queue: "emails" };
@@ -28,16 +23,15 @@
  * const worker = new Worker({
  *   client,
  *   concurrency: 10,
- *   jobs: [sendEmail, generateReport],
+ *   handler: buildHandler([sendEmail, generateReport]),
  * });
  *
  * // Blocks until stopped.
  * await worker.run();
  * ```
  *
- * @example Handler-based worker (low-level / cross-language)
+ * @example Manual dispatch (low-level / cross-language)
  * ```ts
- * const client = new Client({ url: "http://localhost:7890" });
  * const worker = new Worker({
  *   client,
  *   queues: ["payments"],
@@ -70,17 +64,45 @@ import {
   type FailureOptions,
 } from "./client.ts";
 
-import type { JobFunction, JobHandler } from "./handler.ts";
+import type { JobHandler } from "./handler.ts";
 
 /**
  * Options for constructing a {@link Worker}.
- *
- * Provide either `jobs` (function-based dispatch) or `handler` (manual
- * dispatch), but not both.
  */
 export interface WorkerOptions {
   /** Zizq client instance to use for all server communication. */
   client: Client;
+
+  /**
+   * Handler function called for every job received.
+   *
+   * For function-based dispatch (looking up handlers by job type), use
+   * `buildHandler([...])` to build a dispatcher from an array
+   * of `JobFunction`s.
+   *
+   * @example Manual dispatch
+   * ```ts
+   * new Worker({
+   *   client,
+   *   handler: async (job) => {
+   *     switch (job.type) {
+   *       case "charge_card": return chargeCard(job.payload);
+   *     }
+   *   },
+   * });
+   * ```
+   *
+   * @example Function-based dispatch
+   * ```ts
+   * import { buildHandler } from "@zizq-labs/zizq";
+   *
+   * new Worker({
+   *   client,
+   *   handler: buildHandler([sendEmail, generateReport]),
+   * });
+   * ```
+   */
+  handler: JobHandler;
 
   /**
    * Maximum number of jobs to process concurrently.
@@ -106,26 +128,6 @@ export interface WorkerOptions {
    * When omitted, the worker takes from all queues.
    */
   queues?: string[];
-
-  /**
-   * Array of job functions for automatic dispatch.
-   *
-   * Each function must have a `.name` or `zizqOptions.type` so the worker
-   * can build a dispatch table mapping job types to handlers.
-   *
-   * Mutually exclusive with `handler`.
-   */
-  jobs?: JobFunction[];
-
-  /**
-   * Single handler function for manual dispatch.
-   *
-   * Called for every job received. The caller is responsible for routing
-   * based on `job.type`.
-   *
-   * Mutually exclusive with `jobs`.
-   */
-  handler?: (job: Job) => Promise<void> | void;
 
   /**
    * Logger for worker diagnostics (retry warnings, unrecoverable errors).
@@ -206,7 +208,7 @@ export class Worker {
   private retryInitialDelay: number;
   private retryMaxDelay: number;
   private retryMultiplier: number;
-  private dispatch: (job: Job) => Promise<void>;
+  private handler: JobHandler;
   private abortController: AbortController | null = null;
 
   // Bulk ack batching buffer.
@@ -219,54 +221,15 @@ export class Worker {
   private ackFlushPromise: Promise<void> = Promise.resolve();
 
   constructor(options: WorkerOptions) {
-    if (options.jobs && options.handler) {
-      throw new Error("Provide either `jobs` or `handler`, not both.");
-    }
-
-    if (!options.jobs && !options.handler) {
-      throw new Error("Provide either `jobs` or `handler`.");
-    }
-
     this.client = options.client;
-
+    this.handler = options.handler;
     this.concurrency = options.concurrency ?? 1;
     this.prefetch = options.prefetch ?? this.concurrency;
     this.logger = options.logger ?? console;
     this.retryInitialDelay = options.requestRetry?.initialDelay ?? 500;
     this.retryMaxDelay = options.requestRetry?.maxDelay ?? 30_000;
     this.retryMultiplier = options.requestRetry?.multiplier ?? 2;
-
     this.queues = options.queues ?? [];
-
-    if (options.jobs) {
-      const handlers = new Map<string, JobHandler>();
-
-      for (const fn of options.jobs) {
-        const typeName = fn.zizqOptions?.type ?? fn.name;
-
-        if (!typeName) {
-          throw new Error(
-            "Job function must have a name or zizqOptions.type"
-          );
-        }
-
-        handlers.set(typeName, fn);
-      }
-
-      this.dispatch = async (job: Job) => {
-        const handler = handlers.get(job.type);
-
-        if (!handler) {
-          throw new Error(`No handler registered for job type: ${job.type}`);
-        }
-
-        await handler(job.payload, job);
-      };
-    } else {
-      this.dispatch = async (job: Job) => {
-        await options.handler!(job);
-      };
-    }
   }
 
   /**
@@ -387,7 +350,7 @@ export class Worker {
    */
   private async processJob(job: Job): Promise<void> {
     try {
-      await this.dispatch(job);
+      await this.handler(job);
       this.scheduleAck(job.id);
     } catch (err) {
       const failure: FailureOptions = {
