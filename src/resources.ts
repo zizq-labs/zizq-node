@@ -2,12 +2,10 @@
 // Licensed under the MIT License. See LICENSE file for details.
 
 /**
- * Rich job object returned by all Client methods.
+ * Typed wrappers over API responses.
  *
- * Wraps the raw job data with a reference to the Client, enabling
- * action methods like `delete()` and `complete()` directly on the job.
- *
- * All job fields are exposed as readonly properties.
+ * These classes wrap raw API data with a Client reference, providing
+ * action methods and pagination helpers.
  *
  * @module
  */
@@ -21,7 +19,9 @@ import type {
   FailureOptions,
 } from "./client.ts";
 
-/** Internal raw job data shape (camelCase, as returned by the API translation layer). */
+// --- JobData ---
+
+/** Raw job data shape (camelCase, as returned by the API translation layer). */
 export interface JobData {
   /** Unique job identifier. */
   id: string;
@@ -81,6 +81,8 @@ export interface JobData {
   /** True if this job was returned as a duplicate (enqueue responses only). */
   duplicate?: boolean;
 }
+
+// --- Job ---
 
 /**
  * A job returned by the Zizq server.
@@ -219,5 +221,73 @@ export class Job {
       uniqueWhile: this.uniqueWhile,
       duplicate: this.duplicate,
     };
+  }
+}
+
+// --- JobPage ---
+
+/**
+ * A page of jobs returned by `Client.listJobs()`.
+ *
+ * Contains the jobs on this page and methods to navigate to adjacent pages.
+ *
+ * @example
+ * ```ts
+ * let page = await client.listJobs({ queue: ["emails"], limit: 10 });
+ *
+ * while (page) {
+ *   for (const job of page) {
+ *     console.log(job.id, job.status);
+ *   }
+ *   page = await page.nextPage();
+ * }
+ * ```
+ */
+export class JobPage {
+  /** The jobs on this page. */
+  readonly jobs: Job[];
+
+  /** @internal */
+  private client: Client;
+  private nextUrl: string | null;
+  private prevUrl: string | null;
+
+  /** @internal */
+  constructor(client: Client, jobs: Job[], pages: { next?: string | null; prev?: string | null }) {
+    this.client = client;
+    this.jobs = jobs;
+    this.nextUrl = pages.next ?? null;
+    this.prevUrl = pages.prev ?? null;
+  }
+
+  /** Whether there is a next page. */
+  get hasNext(): boolean {
+    return this.nextUrl !== null;
+  }
+
+  /** Whether there is a previous page. */
+  get hasPrev(): boolean {
+    return this.prevUrl !== null;
+  }
+
+  /** Iterate over the jobs on this page. */
+  [Symbol.iterator](): IterableIterator<Job> {
+    return this.jobs[Symbol.iterator]();
+  }
+
+  /**
+   * Fetch the next page, or `null` if this is the last page.
+   */
+  async nextPage(): Promise<JobPage | null> {
+    if (!this.nextUrl) return null;
+    return this.client.listJobsByPath(this.nextUrl);
+  }
+
+  /**
+   * Fetch the previous page, or `null` if this is the first page.
+   */
+  async prevPage(): Promise<JobPage | null> {
+    if (!this.prevUrl) return null;
+    return this.client.listJobsByPath(this.prevUrl);
   }
 }

@@ -16,7 +16,7 @@ import type {
   RetentionConfig,
   UniqueScope,
 } from "./client.ts";
-import type { Job } from "./job.ts";
+import type { Job } from "./resources.ts";
 
 /**
  * Configuration that can be attached to a job function via `fn.zizqOptions`.

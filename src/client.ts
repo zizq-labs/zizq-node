@@ -37,7 +37,7 @@
 import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
-import { Job, type JobData } from "./job.ts";
+import { Job, JobPage, type JobData } from "./resources.ts";
 
 /** Lifecycle status of a job. */
 export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
@@ -45,8 +45,8 @@ export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dea
 /** Uniqueness scope for deduplication. */
 export type UniqueScope = "queued" | "active" | "exists";
 
-// Re-export Job and JobData so consumers can import from client.ts.
-export { Job, type JobData } from "./job.ts";
+// Re-export resource types so consumers can import from client.ts.
+export { Job, JobPage, type JobData } from "./resources.ts";
 
 /**
  * Backoff configuration for retry delays.
@@ -222,6 +222,67 @@ export interface TakeOptions {
 
   /** AbortSignal to cancel the streaming connection. */
   signal?: AbortSignal;
+}
+
+/**
+ * Options for listing jobs with cursor-based pagination.
+ *
+ * @example
+ * ```ts
+ * const page = await client.listJobs({
+ *   queue: "emails",
+ *   status: ["ready", "in_flight"],
+ *   limit: 20,
+ * });
+ * ```
+ */
+export interface ListJobsOptions {
+  /** Cursor: start after this job ID (exclusive). */
+  from?: string;
+
+  /** Sort order. Default: "asc" (oldest first). */
+  order?: "asc" | "desc";
+
+  /** Maximum number of jobs per page (1–2000, default 50). */
+  limit?: number;
+
+  /** Filter by status. Accepts a single value or an array. */
+  status?: JobStatus | JobStatus[];
+
+  /** Filter by queue name. Accepts a single value or an array. */
+  queue?: string | string[];
+
+  /** Filter by job type. Accepts a single value or an array. */
+  type?: string | string[];
+
+  /** Filter by job ID. Accepts a single value or an array. */
+  id?: string | string[];
+
+  /** jq expression to filter jobs by payload. */
+  filter?: string;
+}
+
+// --- API response shapes (used internally for type-safe casting) ---
+
+/** Response shape for `GET /jobs`. */
+interface ListJobsResponse {
+  jobs: unknown[];
+  pages: { self?: string; next?: string; prev?: string };
+}
+
+/** Response shape for `GET /health`. */
+interface HealthResponse {
+  status: string;
+}
+
+/** Response shape for `GET /version`. */
+interface VersionResponse {
+  version: string;
+}
+
+/** Response shape for `GET /queues`. */
+interface QueuesResponse {
+  queues: string[];
 }
 
 /**
@@ -524,12 +585,57 @@ export class Client {
   }
 
   /**
+   * List jobs with cursor-based pagination.
+   *
+   * Returns a single page of jobs. Use `page.nextPage()` and
+   * `page.prevPage()` to navigate between pages.
+   *
+   * @example
+   * ```ts
+   * const page = await client.listJobs({ queue: ["emails"], limit: 10 });
+   * for (const job of page.jobs) {
+   *   console.log(job.id, job.status);
+   * }
+   * if (page.hasNext) {
+   *   const next = await page.nextPage();
+   * }
+   * ```
+   */
+  async listJobs(options: ListJobsOptions = {}): Promise<JobPage> {
+    const params = new URLSearchParams();
+    if (options.from != null) params.set("from", options.from);
+    if (options.order != null) params.set("order", options.order);
+    if (options.limit != null) params.set("limit", String(options.limit));
+    if (options.status) params.set("status", toCommaList(options.status));
+    if (options.queue) params.set("queue", toCommaList(options.queue));
+    if (options.type) params.set("type", toCommaList(options.type));
+    if (options.id) params.set("id", toCommaList(options.id));
+    if (options.filter != null) params.set("filter", options.filter);
+
+    const qs = params.toString();
+    const path = `/jobs${qs ? "?" + qs : ""}`;
+
+    return this.listJobsByPath(path);
+  }
+
+  /**
+   * Fetch a page of jobs by a raw path (used internally for pagination links).
+   *
+   * @internal
+   */
+  async listJobsByPath(path: string): Promise<JobPage> {
+    const data = await this.handleResponse(await this.request("GET", path)) as ListJobsResponse;
+    const jobs = data.jobs.map((j) => this.wrapJob(j));
+    return new JobPage(this, jobs, data.pages);
+  }
+
+  /**
    * Health check.
    *
    * @returns The parsed response body, e.g. `{ status: "ok" }`.
    */
-  async health(): Promise<{ status: string }> {
-    return await this.handleResponse(await this.request("GET", "/health")) as { status: string };
+  async health(): Promise<HealthResponse> {
+    return await this.handleResponse(await this.request("GET", "/health")) as HealthResponse;
   }
 
   /**
@@ -538,7 +644,7 @@ export class Client {
    * @returns The server's version string.
    */
   async serverVersion(): Promise<string> {
-    const data = await this.handleResponse(await this.request("GET", "/version")) as { version: string };
+    const data = await this.handleResponse(await this.request("GET", "/version")) as VersionResponse;
     return data.version;
   }
 
@@ -548,7 +654,7 @@ export class Client {
    * @returns An array of queue name strings, sorted alphabetically.
    */
   async queues(): Promise<string[]> {
-    const data = await this.handleResponse(await this.request("GET", "/queues")) as { queues: string[] };
+    const data = await this.handleResponse(await this.request("GET", "/queues")) as QueuesResponse;
     return data.queues;
   }
 
@@ -787,6 +893,11 @@ export class Client {
 // values are preserved (needed for PATCH resets).
 
 /** Strip keys whose value is `undefined` from an object (in place). */
+/** Normalize a scalar or array to a comma-separated string. */
+function toCommaList(value: string | string[]): string {
+  return Array.isArray(value) ? value.join(",") : value;
+}
+
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
   for (const k in obj) if (obj[k] === undefined) delete obj[k];
   return obj;

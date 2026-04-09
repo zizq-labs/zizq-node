@@ -4,6 +4,7 @@
 export {
   Client,
   Job,
+  JobPage,
   ZizqError,
   ConnectionError,
   ResponseError,
@@ -16,6 +17,7 @@ export type {
   ClientOptions,
   JobData,
   EnqueueOptions,
+  ListJobsOptions,
   FailureOptions,
   TakeOptions,
   BackoffConfig,

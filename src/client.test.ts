@@ -196,6 +196,106 @@ describe("Client", () => {
     });
   });
 
+  describe("listJobs", () => {
+    it("returns a page of jobs", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?queue=emails&limit=2", method: "GET" })
+        .reply(200, {
+          jobs: [
+            { id: "j1", type: "test", queue: "emails", priority: 0, status: "ready", ready_at: 1000, attempts: 0 },
+            { id: "j2", type: "test", queue: "emails", priority: 0, status: "ready", ready_at: 2000, attempts: 0 },
+          ],
+          pages: {
+            self: "/jobs?queue=emails&limit=2",
+            next: "/jobs?queue=emails&limit=2&from=j2",
+          },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page = await ctx.client.listJobs({ queue: ["emails"], limit: 2 });
+
+      assert.equal(page.jobs.length, 2);
+      assert.equal(page.jobs[0].id, "j1");
+      assert.equal(page.jobs[1].id, "j2");
+      assert.ok(page.hasNext);
+      assert.ok(!page.hasPrev);
+    });
+
+    it("follows nextPage link", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?limit=1", method: "GET" })
+        .reply(200, {
+          jobs: [
+            { id: "j1", type: "test", queue: "q", priority: 0, status: "ready", ready_at: 1000, attempts: 0 },
+          ],
+          pages: {
+            self: "/jobs?limit=1",
+            next: "/jobs?limit=1&from=j1",
+          },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      ctx.mockPool
+        .intercept({ path: "/jobs?limit=1&from=j1", method: "GET" })
+        .reply(200, {
+          jobs: [
+            { id: "j2", type: "test", queue: "q", priority: 0, status: "ready", ready_at: 2000, attempts: 0 },
+          ],
+          pages: {
+            self: "/jobs?limit=1&from=j1",
+          },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page1 = await ctx.client.listJobs({ limit: 1 });
+      assert.equal(page1.jobs[0].id, "j1");
+      assert.ok(page1.hasNext);
+
+      const page2 = await page1.nextPage();
+      assert.ok(page2);
+      assert.equal(page2!.jobs[0].id, "j2");
+      assert.ok(!page2!.hasNext);
+    });
+
+    it("returns null for nextPage on last page", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs", method: "GET" })
+        .reply(200, {
+          jobs: [],
+          pages: { self: "/jobs" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const page = await ctx.client.listJobs();
+      assert.equal(page.jobs.length, 0);
+      assert.ok(!page.hasNext);
+
+      const next = await page.nextPage();
+      assert.equal(next, null);
+    });
+
+    it("jobs on page are Job instances", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs", method: "GET" })
+        .reply(200, {
+          jobs: [
+            { id: "j1", type: "test", queue: "q", priority: 0, status: "ready", ready_at: 1000, attempts: 0 },
+          ],
+          pages: { self: "/jobs" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const { Job } = await import("./resources.ts");
+      const page = await ctx.client.listJobs();
+      assert.ok(page.jobs[0] instanceof Job);
+    });
+  });
+
   describe("msgpack format", () => {
     let msgCtx: MockContext;
 
