@@ -437,10 +437,11 @@ export class Client {
   private http: Dispatcher;
   /** Separate pool for long-lived streaming connections (take). */
   private streamHttp: Dispatcher;
-  private origin: string;
+  /** The base URL of the Zizq server. */
+  readonly url: string;
 
   constructor(options: ClientOptions) {
-    this.origin = options.url.replace(/\/+$/, "");
+    this.url = options.url.replace(/\/+$/, "");
 
     if (options.dispatcher) {
       // Testing: use the same dispatcher for both.
@@ -454,7 +455,7 @@ export class Client {
       } : undefined;
 
       // HTTP/2 for request/response traffic (multiplexed acks, enqueues).
-      this.http = new Pool(this.origin, {
+      this.http = new Pool(this.url, {
         allowH2: true,
         connect: connectOpts,
       });
@@ -463,7 +464,7 @@ export class Client {
       // overhead and flow control with no multiplexing benefit on a
       // single long-lived response, resulting in measurably lower
       // throughput compared to HTTP/1.1 chunked transfer.
-      this.streamHttp = new Pool(this.origin, {
+      this.streamHttp = new Pool(this.url, {
         allowH2: false,
         connect: connectOpts,
       });
@@ -585,7 +586,27 @@ export class Client {
    * }
    * ```
    */
-  async *take(options: TakeOptions = {}): AsyncGenerator<JobData> {
+  /**
+   * Connect to the streaming take endpoint and return an async generator
+   * of jobs.
+   *
+   * The returned promise resolves once the HTTP connection is established.
+   * The async generator then yields jobs as they arrive via NDJSON. Empty
+   * lines in the stream are heartbeats and are silently skipped.
+   *
+   * The generator completes when the server closes the connection. The
+   * caller may also break out of the loop explicitly to end the stream,
+   * or provide an AbortSignal to explicitly signal cancellation.
+   *
+   * @example
+   * ```ts
+   * for await (const job of await client.take({ prefetch: 5, queues: ["emails"] })) {
+   *   await processJob(job.payload);
+   *   await client.reportSuccess(job.id);
+   * }
+   * ```
+   */
+  async take(options: TakeOptions = {}): Promise<AsyncGenerator<JobData>> {
     const params = new URLSearchParams();
     if (options.prefetch != null) {
       params.set("prefetch", String(options.prefetch));
@@ -608,10 +629,13 @@ export class Client {
       await this.throwOnError(res);
     }
 
+    const body = res.body as Readable;
+    return this.iterateNdjson(body);
+  }
+
+  private async *iterateNdjson(body: Readable): AsyncGenerator<JobData> {
     const decoder = new TextDecoder();
     let buffer = "";
-
-    const body = res.body as Readable;
 
     try {
       for await (const chunk of body) {

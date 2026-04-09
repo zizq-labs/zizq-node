@@ -136,10 +136,51 @@ export interface WorkerOptions {
    * Default: `console`.
    */
   logger?: Logger;
+
+  /**
+   * Retry configuration for transient HTTP failures (connection drops,
+   * server errors). Applies to both the take stream (reconnection) and
+   * ack/nack requests.
+   *
+   * This is unrelated to Zizq's job-level retry/backoff — it controls
+   * how the worker retries its own communication with the server.
+   *
+   * Client errors (4xx) are never retried.
+   */
+  requestRetry?: RequestRetryOptions;
+}
+
+/**
+ * Configuration for ack/nack retry backoff.
+ *
+ * The delay between retries follows: `min(initialDelay * multiplier^(attempt-1), maxDelay)`.
+ */
+export interface RequestRetryOptions {
+  /**
+   * Initial delay in milliseconds before the first retry.
+   *
+   * Default: 500.
+   */
+  initialDelay?: number;
+
+  /**
+   * Maximum delay in milliseconds between retries.
+   *
+   * Default: 30000 (30 seconds).
+   */
+  maxDelay?: number;
+
+  /**
+   * Multiplier applied to the delay after each failed attempt.
+   *
+   * Default: 2.
+   */
+  multiplier?: number;
 }
 
 /** Minimal logger interface used by the worker. */
 export interface Logger {
+  info(...args: unknown[]): void;
   error(...args: unknown[]): void;
 }
 
@@ -162,6 +203,9 @@ export class Worker {
   private prefetch: number;
   private queues: string[];
   private logger: Logger;
+  private retryInitialDelay: number;
+  private retryMaxDelay: number;
+  private retryMultiplier: number;
   private dispatch: (job: JobData) => Promise<void>;
   private abortController: AbortController | null = null;
 
@@ -188,6 +232,9 @@ export class Worker {
     this.concurrency = options.concurrency ?? 1;
     this.prefetch = options.prefetch ?? this.concurrency;
     this.logger = options.logger ?? console;
+    this.retryInitialDelay = options.requestRetry?.initialDelay ?? 500;
+    this.retryMaxDelay = options.requestRetry?.maxDelay ?? 30_000;
+    this.retryMultiplier = options.requestRetry?.multiplier ?? 2;
 
     this.queues = options.queues ?? [];
 
@@ -223,12 +270,17 @@ export class Worker {
   }
 
   /**
-   * Start processing jobs. Blocks until {@link stop} is called or the
-   * connection is lost.
+   * Start processing jobs. Blocks until {@link stop} is called.
    *
    * Opens a streaming connection to the server's take endpoint and
    * dispatches incoming jobs to the registered handlers concurrently.
-   * On shutdown, waits for all in-flight jobs to complete before returning.
+   *
+   * Automatically reconnects with exponential backoff if the connection
+   * drops or the server is unreachable. The backoff is reset after a
+   * successful connection. Uses the `requestRetry` configuration.
+   *
+   * On shutdown, waits for all in-flight jobs to complete and flushes
+   * pending acks before returning.
    *
    * @example
    * ```ts
@@ -243,46 +295,73 @@ export class Worker {
    */
   async run(): Promise<void> {
     this.abortController = new AbortController();
-    const inFlight = new Set<Promise<void>>();
+    let attempt = 0;
 
-    const takeOpts: TakeOptions = {
-      prefetch: this.prefetch,
-      queues: this.queues.length > 0 ? this.queues : undefined,
-      signal: this.abortController.signal,
-    };
+    while (!this.abortController.signal.aborted) {
+      const inFlight = new Set<Promise<void>>();
 
-    try {
-      for await (const job of this.client.take(takeOpts)) {
-        if (this.abortController.signal.aborted) break;
+      try {
+        const takeOpts: TakeOptions = {
+          prefetch: this.prefetch,
+          queues: this.queues.length > 0 ? this.queues : undefined,
+          signal: this.abortController.signal,
+        };
 
-        const task = this.processJob(job).finally(() => {
-          inFlight.delete(task);
-        });
+        const stream = await this.client.take(takeOpts);
 
-        inFlight.add(task);
+        if (attempt > 0) {
+          this.logger.info(`[zizq] reconnected to ${this.client.url}`);
+        } else {
+          this.logger.info(`[zizq] connected to ${this.client.url}`);
+        }
+        attempt = 0;
 
-        // If we've hit concurrency limit, wait for one to finish.
-        if (inFlight.size >= this.concurrency) {
-          await Promise.race(inFlight);
+        for await (const job of stream) {
+          if (this.abortController.signal.aborted) break;
+
+          const task = this.processJob(job).finally(() => {
+            inFlight.delete(task);
+          });
+
+          inFlight.add(task);
+
+          // If we've hit concurrency limit, wait for one to finish.
+          if (inFlight.size >= this.concurrency) {
+            await Promise.race(inFlight);
+          }
+        }
+      } catch (err) {
+        if (this.abortController.signal.aborted) {
+          // Expected — stop() was called.
+        } else if (err instanceof ClientError) {
+          // Client errors are not transient — don't reconnect.
+          throw err;
+        } else {
+          attempt++;
+          const delay = Math.min(
+            this.retryInitialDelay * Math.pow(this.retryMultiplier, attempt - 1),
+            this.retryMaxDelay,
+          );
+          this.logger.error(
+            `[zizq] disconnected from ${this.client.url} (attempt ${attempt}, reconnecting in ${delay}ms):`,
+            err instanceof Error ? err.message : err,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
         }
       }
-    } catch (err) {
-      if (this.abortController.signal.aborted) {
-        // Expected — stop() was called.
-      } else {
-        throw err;
-      }
-    }
 
-    // Drain remaining in-flight jobs.
-    if (inFlight.size > 0) {
-      await Promise.allSettled(inFlight);
+      // Drain remaining in-flight jobs from this connection.
+      if (inFlight.size > 0) {
+        await Promise.allSettled(inFlight);
+      }
     }
 
     // Wait for any in-flight ack flush to complete, then flush any
     // remaining acks that accumulated during the drain.
     await this.ackFlushPromise;
     await this.flushAcks();
+    this.logger.info("[zizq] worker stopped");
   }
 
   /**
@@ -292,6 +371,7 @@ export class Worker {
    * method will wait for any in-flight jobs to finish before returning.
    */
   stop(): void {
+    this.logger.info("[zizq] stopping worker...");
     this.abortController?.abort();
   }
 
@@ -356,11 +436,10 @@ export class Worker {
    *
    * Client errors (4xx) are not retried — they indicate a permanent problem
    * with the request. Connection errors and server errors (5xx) are retried
-   * indefinitely with exponential backoff capped at 30 seconds.
+   * indefinitely with exponential backoff. Retry timing is configured via
+   * `requestRetry` in `WorkerOptions`.
    */
   private async withRetry(fn: () => Promise<unknown>): Promise<void> {
-    const baseDelay = 500;
-    const maxDelay = 30_000;
     let attempt = 0;
 
     while (true) {
@@ -375,7 +454,10 @@ export class Worker {
         }
 
         attempt++;
-        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+        const delay = Math.min(
+          this.retryInitialDelay * Math.pow(this.retryMultiplier, attempt - 1),
+          this.retryMaxDelay,
+        );
         this.logger.error(
           `[zizq] ack/nack failed (attempt ${attempt}, retrying in ${delay}ms):`,
           err instanceof Error ? err.message : err

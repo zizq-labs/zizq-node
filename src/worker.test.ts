@@ -39,9 +39,11 @@ describe("Worker", () => {
 
   it("dispatches to registered job functions", async () => {
     const processed: unknown[] = [];
+    let worker: Worker;
 
     const testJob: JobFunction = async (payload) => {
       processed.push(payload);
+      worker.stop();
     };
     testJob.zizqOptions = { queue: "q" };
 
@@ -69,9 +71,10 @@ describe("Worker", () => {
       .intercept({ path: "/jobs/success", method: "POST" })
       .reply(204, "");
 
-    const worker = new Worker({
+    worker = new Worker({
       client: ctx.client,
       jobs: [testJob],
+      logger: { info() {}, error() {} },
     });
 
     await worker.run();
@@ -82,6 +85,7 @@ describe("Worker", () => {
 
   it("dispatches to a raw handler", async () => {
     const processed: string[] = [];
+    let worker: Worker;
 
     const job = {
       id: "j2",
@@ -107,12 +111,14 @@ describe("Worker", () => {
       .intercept({ path: "/jobs/success", method: "POST" })
       .reply(204, "");
 
-    const worker = new Worker({
+    worker = new Worker({
       client: ctx.client,
       queues: ["q"],
       handler: async (job) => {
         processed.push(job.type);
+        worker.stop();
       },
+      logger: { info() {}, error() {} },
     });
 
     await worker.run();
@@ -122,7 +128,10 @@ describe("Worker", () => {
   });
 
   it("reports failure when a handler throws", async () => {
+    let worker: Worker;
+
     const failingJob: JobFunction = async () => {
+      worker.stop();
       throw new Error("boom");
     };
     failingJob.zizqOptions = { queue: "q" };
@@ -153,10 +162,10 @@ describe("Worker", () => {
         headers: { "content-type": "application/json" },
       });
 
-    const worker = new Worker({
+    worker = new Worker({
       client: ctx.client,
       jobs: [failingJob],
-      logger: { error() {} }, // suppress retry noise in test output
+      logger: { info() {}, error() {} },
     });
 
     await worker.run();

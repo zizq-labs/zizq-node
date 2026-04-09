@@ -26,7 +26,7 @@ export type {
 
 export { Worker } from "./worker.ts";
 
-export type { WorkerOptions, Logger } from "./worker.ts";
+export type { WorkerOptions, Logger, RequestRetryOptions } from "./worker.ts";
 
 export type {
   JobFunction,
