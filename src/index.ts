@@ -22,6 +22,7 @@ export type {
   JobStatus,
   UniqueScope,
   TlsOptions,
+  Format,
 } from "./client.ts";
 
 export { Worker } from "./worker.ts";

@@ -14,6 +14,8 @@ import fs from "node:fs";
 
 const URL = process.env.ZIZQ_URL || "http://127.0.0.1:7890"
 
+const FORMAT = process.env.ZIZQ_FORMAT || "json";
+
 const CA =
   process.env.ZIZQ_CA &&
     fs.readFileSync(process.env.ZIZQ_CA);
@@ -34,7 +36,7 @@ const JOB_COUNT = parseInt(process.env.JOB_COUNT || "5000");
 const CONCURRENCY = parseInt(process.env.CONCURRENCY || "25");
 const PREFETCH = parseInt(process.env.PREFETCH || CONCURRENCY * 2);
 
-const client = new Client({url: URL, tls: TLS});
+const client = new Client({url: URL, format: FORMAT, tls: TLS});
 
 // --- Enqueue Phase ---
 

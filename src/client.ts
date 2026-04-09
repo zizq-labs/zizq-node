@@ -36,6 +36,7 @@
 
 import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
+import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
 
 /** Lifecycle status of a job. */
 export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
@@ -332,10 +333,20 @@ export interface TlsOptions {
   key?: string | Buffer;
 }
 
+/** Serialization format for client-server communication. */
+export type Format = "json" | "msgpack";
+
 /** Options for constructing a {@link Client}. */
 export interface ClientOptions {
   /** Base URL of the Zizq server, e.g. "http://localhost:7890". */
   url: string;
+
+  /**
+   * Serialization format for request and response bodies.
+   *
+   * Default: "json".
+   */
+  format?: Format;
 
   /** TLS configuration for HTTPS connections. */
   tls?: TlsOptions;
@@ -410,6 +421,18 @@ export class ServerError extends ResponseError {
   }
 }
 
+/** Content-type headers for each format. */
+const CONTENT_TYPES: Record<Format, string> = {
+  json: "application/json",
+  msgpack: "application/msgpack",
+};
+
+/** Accept headers for the streaming take endpoint. */
+const STREAM_ACCEPT: Record<Format, string> = {
+  json: "application/x-ndjson",
+  msgpack: "application/vnd.zizq.msgpack-stream",
+};
+
 /**
  * Low-level HTTP client for the Zizq job queue server.
  *
@@ -439,9 +462,21 @@ export class Client {
   private streamHttp: Dispatcher;
   /** The base URL of the Zizq server. */
   readonly url: string;
+  /** Serialization format. */
+  private format: Format;
+  /** Content-type for requests. */
+  private contentType: string;
+  /** Accept header for request/response endpoints. */
+  private accept: string;
+  /** Accept header for the streaming take endpoint. */
+  private streamAccept: string;
 
   constructor(options: ClientOptions) {
     this.url = options.url.replace(/\/+$/, "");
+    this.format = options.format ?? "json";
+    this.contentType = CONTENT_TYPES[this.format];
+    this.accept = CONTENT_TYPES[this.format];
+    this.streamAccept = STREAM_ACCEPT[this.format];
 
     if (options.dispatcher) {
       // Testing: use the same dispatcher for both.
@@ -567,32 +602,12 @@ export class Client {
   }
 
   /**
-   * Stream jobs from the server via the take endpoint.
-   *
-   * Opens a long-lived streaming connection. The server pushes jobs as
-   * they become available, up to the `prefetch` limit of unacknowledged
-   * jobs. Empty lines in the stream are heartbeats and are silently
-   * skipped.
-   *
-   * The generator completes when the server closes the connection. The caller
-   * may also break out of the loop explicitly to end the stream, or provide an
-   * AbortSignal to explicitly signal cancellation.
-   *
-   * @example
-   * ```ts
-   * for await (const job of client.take({ prefetch: 5, queues: ["emails"] })) {
-   *   await processJob(job.payload);
-   *   await client.reportSuccess(job.id);
-   * }
-   * ```
-   */
-  /**
    * Connect to the streaming take endpoint and return an async generator
    * of jobs.
    *
    * The returned promise resolves once the HTTP connection is established.
-   * The async generator then yields jobs as they arrive via NDJSON. Empty
-   * lines in the stream are heartbeats and are silently skipped.
+   * The async generator then yields jobs as they arrive. Heartbeats in
+   * the stream are silently skipped.
    *
    * The generator completes when the server closes the connection. The
    * caller may also break out of the loop explicitly to end the stream,
@@ -621,7 +636,7 @@ export class Client {
     const res = await this.streamHttp.request({
       method: "GET",
       path,
-      headers: { accept: "application/x-ndjson" },
+      headers: { accept: this.streamAccept },
       signal: options.signal ?? null,
     });
 
@@ -630,9 +645,17 @@ export class Client {
     }
 
     const body = res.body as Readable;
+
+    // Use the response content-type to pick the stream parser, not the
+    // requested format — the server may respond differently (e.g. 406).
+    const contentType = String(res.headers["content-type"] ?? "");
+    if (contentType.includes("msgpack")) {
+      return this.iterateMsgpackStream(body);
+    }
     return this.iterateNdjson(body);
   }
 
+  /** Parse an NDJSON stream, yielding jobs. Empty lines are heartbeats. */
   private async *iterateNdjson(body: Readable): AsyncGenerator<JobData> {
     const decoder = new TextDecoder();
     let buffer = "";
@@ -646,17 +669,48 @@ export class Client {
           const line = buffer.slice(0, newlineIdx).trim();
           buffer = buffer.slice(newlineIdx + 1);
 
-          // Empty lines are heartbeats.
           if (line.length === 0) continue;
 
           yield jobFromApi(JSON.parse(line));
         }
       }
     } finally {
-      // Ensure the response body is destroyed when the generator exits,
-      // whether by completion, break, throw, or abandonment. This closes
-      // the HTTP stream so the server knows the client disconnected and
-      // can requeue any in-flight jobs.
+      body.destroy();
+    }
+  }
+
+  /**
+   * Parse a length-prefixed MessagePack stream, yielding jobs.
+   *
+   * Frame format: [4-byte big-endian length][MessagePack payload].
+   * A zero-length frame is a heartbeat and is silently skipped.
+   */
+  private async *iterateMsgpackStream(body: Readable): AsyncGenerator<JobData> {
+    let buffer = Buffer.alloc(0);
+
+    try {
+      for await (const chunk of body) {
+        buffer = Buffer.concat([buffer, chunk as Uint8Array]);
+
+        while (buffer.length >= 4) {
+          const frameLen = buffer.readUInt32BE(0);
+
+          // Zero-length frame is a heartbeat.
+          if (frameLen === 0) {
+            buffer = buffer.subarray(4);
+            continue;
+          }
+
+          // Wait for the full frame.
+          if (buffer.length < 4 + frameLen) break;
+
+          const payload = buffer.subarray(4, 4 + frameLen);
+          buffer = buffer.subarray(4 + frameLen);
+
+          yield jobFromApi(msgpackDecode(payload));
+        }
+      }
+    } finally {
       body.destroy();
     }
   }
@@ -693,7 +747,7 @@ export class Client {
         method: method as Dispatcher.HttpMethod,
         path,
         headers: {
-          accept: "application/json",
+          accept: this.accept,
           ...extraHeaders,
         },
       });
@@ -708,14 +762,22 @@ export class Client {
         method: "POST",
         path,
         headers: {
-          "content-type": "application/json",
-          accept: "application/json",
+          "content-type": this.contentType,
+          accept: this.accept,
         },
-        body: JSON.stringify(body),
+        body: this.encode(body),
       });
     } catch (err) {
       throw toConnectionError(err);
     }
+  }
+
+  /** Encode a value in the configured format. */
+  private encode(value: unknown): string | Buffer {
+    if (this.format === "msgpack") {
+      return Buffer.from(msgpackEncode(value));
+    }
+    return JSON.stringify(value);
   }
 
   private async handleResponse(res: Dispatcher.ResponseData): Promise<unknown> {
@@ -725,7 +787,7 @@ export class Client {
       return undefined;
     }
 
-    const body = await readJson(res.body);
+    const body = await this.readBody(res);
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw buildResponseError(res.statusCode, body);
@@ -737,11 +799,27 @@ export class Client {
   private async throwOnError(res: Dispatcher.ResponseData): Promise<never> {
     let body: unknown;
     try {
-      body = await readJson(res.body);
+      body = await this.readBody(res);
     } catch {
       body = undefined;
     }
     throw buildResponseError(res.statusCode, body);
+  }
+
+  /** Read and decode a response body, using the content-type header to
+   *  pick the correct decoder rather than assuming the requested format. */
+  private async readBody(res: Dispatcher.ResponseData): Promise<unknown> {
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of res.body as Readable) {
+      chunks.push(chunk as Uint8Array);
+    }
+    const data = Buffer.concat(chunks);
+
+    const contentType = String(res.headers["content-type"] ?? "");
+    if (contentType.includes("msgpack")) {
+      return msgpackDecode(data);
+    }
+    return JSON.parse(new TextDecoder().decode(data));
   }
 }
 
@@ -857,12 +935,3 @@ function toConnectionError(err: unknown): ConnectionError {
   return new ConnectionError(message);
 }
 
-/** Read and parse a JSON response body from an undici stream. */
-async function readJson(body: Dispatcher.ResponseData["body"]): Promise<unknown> {
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of body as Readable) {
-    chunks.push(chunk as Uint8Array);
-  }
-  const text = new TextDecoder().decode(Buffer.concat(chunks));
-  return JSON.parse(text);
-}

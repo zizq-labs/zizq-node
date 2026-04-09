@@ -3,8 +3,9 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { ZizqError, ClientError, ResponseError } from "./client.ts";
-import { createMockContext, type MockContext } from "./test-helpers.ts";
+import { ZizqError, ClientError, ResponseError, Client } from "./client.ts";
+import { createMockContext, msgpackBody, msgpackStreamBody, type MockContext } from "./test-helpers.ts";
+import { encode as msgpackEncode } from "@msgpack/msgpack";
 
 describe("Client", () => {
   let ctx: MockContext;
@@ -142,6 +143,107 @@ describe("Client", () => {
       assert.equal(job.id, "job1");
       assert.deepEqual(job.payload, { key: "value" });
       assert.equal(job.readyAt, 1000);
+    });
+  });
+
+  describe("msgpack format", () => {
+    let msgCtx: MockContext;
+
+    beforeEach(() => {
+      msgCtx = createMockContext("msgpack");
+    });
+
+    afterEach(async () => {
+      await msgCtx.mockAgent.close();
+    });
+
+    it("sends msgpack-encoded body and decodes msgpack response", async () => {
+      const jobResponse = {
+        id: "m1",
+        type: "test",
+        queue: "q",
+        priority: 0,
+        status: "ready",
+        ready_at: 1000,
+        attempts: 0,
+      };
+
+      msgCtx.mockPool
+        .intercept({ path: "/jobs", method: "POST" })
+        .reply(201, msgpackBody(jobResponse), {
+          headers: { "content-type": "application/msgpack" },
+        });
+
+      const job = await msgCtx.client.enqueue({
+        type: "test",
+        queue: "q",
+        payload: { x: 1 },
+      });
+
+      assert.equal(job.id, "m1");
+      assert.equal(job.readyAt, 1000);
+    });
+
+    it("decodes JSON error response even when using msgpack", async () => {
+      // Server may respond with JSON for errors regardless of Accept header.
+      msgCtx.mockPool
+        .intercept({ path: "/jobs", method: "POST" })
+        .reply(400, { error: "bad request" }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      await assert.rejects(
+        () => msgCtx.client.enqueue({ type: "t", queue: "q", payload: null }),
+        (err: unknown) => {
+          assert.ok(err instanceof ClientError);
+          assert.equal(err.message, "bad request");
+          return true;
+        }
+      );
+    });
+
+    it("streams jobs via msgpack-stream take endpoint", async () => {
+      const job1 = {
+        id: "s1",
+        type: "test",
+        queue: "q",
+        priority: 0,
+        status: "in_flight",
+        payload: { n: 1 },
+        ready_at: 1000,
+        attempts: 0,
+      };
+      const job2 = {
+        id: "s2",
+        type: "test",
+        queue: "q",
+        priority: 0,
+        status: "in_flight",
+        payload: { n: 2 },
+        ready_at: 1000,
+        attempts: 0,
+      };
+
+      msgCtx.mockPool
+        .intercept({
+          path: (path: string) => path.startsWith("/jobs/take"),
+          method: "GET",
+        })
+        .reply(200, msgpackStreamBody([job1, job2]), {
+          headers: { "content-type": "application/vnd.zizq.msgpack-stream" },
+        });
+
+      const stream = await msgCtx.client.take({ prefetch: 2 });
+      const jobs = [];
+      for await (const job of stream) {
+        jobs.push(job);
+      }
+
+      assert.equal(jobs.length, 2);
+      assert.equal(jobs[0].id, "s1");
+      assert.deepEqual(jobs[0].payload, { n: 1 });
+      assert.equal(jobs[1].id, "s2");
+      assert.deepEqual(jobs[1].payload, { n: 2 });
     });
   });
 });
