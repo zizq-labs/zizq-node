@@ -602,6 +602,35 @@ export class Client {
   }
 
   /**
+   * Health check.
+   *
+   * @returns The parsed response body, e.g. `{ status: "ok" }`.
+   */
+  async health(): Promise<{ status: string }> {
+    return await this.handleResponse(await this.request("GET", "/health")) as { status: string };
+  }
+
+  /**
+   * Server version.
+   *
+   * @returns The server's version string.
+   */
+  async serverVersion(): Promise<string> {
+    const data = await this.handleResponse(await this.request("GET", "/version")) as { version: string };
+    return data.version;
+  }
+
+  /**
+   * List all distinct queue names on the server.
+   *
+   * @returns An array of queue name strings, sorted alphabetically.
+   */
+  async queues(): Promise<string[]> {
+    const data = await this.handleResponse(await this.request("GET", "/queues")) as { queues: string[] };
+    return data.queues;
+  }
+
+  /**
    * Connect to the streaming take endpoint and return an async generator
    * of jobs.
    *

@@ -146,6 +146,56 @@ describe("Client", () => {
     });
   });
 
+  describe("health", () => {
+    it("returns status ok", async () => {
+      ctx.mockPool
+        .intercept({ path: "/health", method: "GET" })
+        .reply(200, { status: "ok" }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const result = await ctx.client.health();
+      assert.equal(result.status, "ok");
+    });
+  });
+
+  describe("version", () => {
+    it("returns the server version string", async () => {
+      ctx.mockPool
+        .intercept({ path: "/version", method: "GET" })
+        .reply(200, { version: "0.1.0" }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const result = await ctx.client.serverVersion();
+      assert.equal(result, "0.1.0");
+    });
+  });
+
+  describe("queues", () => {
+    it("returns an array of queue names", async () => {
+      ctx.mockPool
+        .intercept({ path: "/queues", method: "GET" })
+        .reply(200, { queues: ["emails", "payments"] }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const result = await ctx.client.queues();
+      assert.deepEqual(result, ["emails", "payments"]);
+    });
+
+    it("returns empty array when no queues exist", async () => {
+      ctx.mockPool
+        .intercept({ path: "/queues", method: "GET" })
+        .reply(200, { queues: [] }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const result = await ctx.client.queues();
+      assert.deepEqual(result, []);
+    });
+  });
+
   describe("msgpack format", () => {
     let msgCtx: MockContext;
 
