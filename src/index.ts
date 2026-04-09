@@ -20,6 +20,7 @@ export type {
   JobData,
   EnqueueOptions,
   ListJobsOptions,
+  DeleteJobsOptions,
   ListErrorsOptions,
   ErrorRecordData,
   FailureOptions,

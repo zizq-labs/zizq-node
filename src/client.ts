@@ -284,6 +284,34 @@ export interface ListErrorsOptions {
   limit?: number;
 }
 
+/**
+ * Filter options for bulk-deleting jobs.
+ *
+ * An empty options object deletes all jobs.
+ *
+ * @example
+ * ```ts
+ * // Delete all dead jobs in the emails queue
+ * const count = await client.deleteAllJobs({ queue: "emails", status: "dead" });
+ * ```
+ */
+export interface DeleteJobsOptions {
+  /** Filter by job ID. Accepts a single value or an array. */
+  id?: string | string[];
+
+  /** Filter by status. Accepts a single value or an array. */
+  status?: JobStatus | JobStatus[];
+
+  /** Filter by queue name. Accepts a single value or an array. */
+  queue?: string | string[];
+
+  /** Filter by job type. Accepts a single value or an array. */
+  type?: string | string[];
+
+  /** jq expression to filter jobs by payload. */
+  filter?: string;
+}
+
 // --- API response shapes (used internally for type-safe casting) ---
 
 /** Response shape for `GET /jobs`. */
@@ -305,6 +333,11 @@ interface VersionResponse {
 /** Response shape for `GET /queues`. */
 interface QueuesResponse {
   queues: string[];
+}
+
+/** Response shape for `DELETE /jobs`. */
+interface DeleteJobsResponse {
+  deleted: number;
 }
 
 /** Response shape for `GET /jobs/{id}/errors` */
@@ -564,7 +597,7 @@ export class Client {
    * @throws {ZizqError} If the job is not found or not in-flight.
    */
   async reportSuccess(id: string): Promise<void> {
-    const res = await this.request("POST", `/jobs/${id}/success`);
+    const res = await this.request("POST", `/jobs/${encodeURIComponent(id)}/success`);
     if (res.statusCode !== 204) {
       await this.throwOnError(res);
     }
@@ -599,7 +632,7 @@ export class Client {
    */
   async reportFailure(id: string, options: FailureOptions): Promise<Job> {
     const api = failureToApi(options);
-    return this.wrapJob(await this.handleResponse(await this.post(`/jobs/${id}/failure`, api)));
+    return this.wrapJob(await this.handleResponse(await this.post(`/jobs/${encodeURIComponent(id)}/failure`, api)));
   }
 
   /**
@@ -610,7 +643,60 @@ export class Client {
    * @throws {ZizqError} If the job is not found (404).
    */
   async getJob(id: string): Promise<Job> {
-    return this.wrapJob(await this.handleResponse(await this.request("GET", `/jobs/${id}`)));
+    return this.wrapJob(await this.handleResponse(await this.request("GET", `/jobs/${encodeURIComponent(id)}`)));
+  }
+
+  /**
+   * Delete a single job by ID.
+   *
+   * @param id - The job ID to delete.
+   * @throws {NotFoundError} If the job is not found.
+   */
+  async deleteJob(id: string): Promise<void> {
+    const res = await this.request("DELETE", `/jobs/${encodeURIComponent(id)}`);
+    if (res.statusCode !== 204) {
+      await this.throwOnError(res);
+    }
+  }
+
+  /**
+   * Delete jobs matching the given filters.
+   *
+   * An empty options object deletes all jobs.
+   *
+   * @returns The number of deleted jobs.
+   *
+   * @example
+   * ```ts
+   * const count = await client.deleteAllJobs({ queue: "emails", status: "dead" });
+   * ```
+   */
+  async deleteAllJobs(options: DeleteJobsOptions = {}): Promise<number> {
+    // Build the multi-value filters first so we can short-circuit if any
+    // resolves to an empty string. An empty filter matches nothing — we
+    // don't want to pass it as "no filter" and accidentally delete everything.
+    const id = options.id != null ? toCommaList(options.id) : undefined;
+    const status = options.status != null ? toCommaList(options.status) : undefined;
+    const queue = options.queue != null ? toCommaList(options.queue) : undefined;
+    const type = options.type != null ? toCommaList(options.type) : undefined;
+
+    if (id === "" || status === "" || queue === "" || type === "") return 0;
+
+    const params = new URLSearchParams();
+    if (id != null) params.set("id", id);
+    if (status != null) params.set("status", status);
+    if (queue != null) params.set("queue", queue);
+    if (type != null) params.set("type", type);
+    if (options.filter != null) params.set("filter", options.filter);
+
+    const qs = params.toString();
+    const path = `/jobs${qs ? "?" + qs : ""}`;
+
+    const data = await this.handleResponse(
+      await this.request("DELETE", path)
+    ) as DeleteJobsResponse;
+
+    return data.deleted;
   }
 
   /**
@@ -708,7 +794,7 @@ export class Client {
     if (options.limit != null) params.set("limit", String(options.limit));
 
     const qs = params.toString();
-    const path = `/jobs/${id}/errors${qs ? "?" + qs : ""}`;
+    const path = `/jobs/${encodeURIComponent(id)}/errors${qs ? "?" + qs : ""}`;
 
     return this.listErrorsByPath(path);
   }
@@ -734,7 +820,7 @@ export class Client {
    */
   async getError(id: string, attempt: number): Promise<ErrorRecord> {
     const raw = await this.handleResponse(
-      await this.request("GET", `/jobs/${id}/errors/${attempt}`)
+      await this.request("GET", `/jobs/${encodeURIComponent(id)}/errors/${encodeURIComponent(String(attempt))}`)
     );
     return this.wrapError(raw);
   }
@@ -978,12 +1064,12 @@ export class Client {
 // delete so they don't appear as keys in the JSON body, while `null`
 // values are preserved (needed for PATCH resets).
 
-/** Strip keys whose value is `undefined` from an object (in place). */
 /** Normalize a scalar or array to a comma-separated string. */
 function toCommaList(value: string | string[]): string {
   return Array.isArray(value) ? value.join(",") : value;
 }
 
+/** Strip keys whose value is `undefined` from an object (in place). */
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
   for (const k in obj) if (obj[k] === undefined) delete obj[k];
   return obj;

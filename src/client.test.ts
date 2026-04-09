@@ -196,6 +196,74 @@ describe("Client", () => {
     });
   });
 
+  describe("deleteJob", () => {
+    it("deletes a job and returns void", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1", method: "DELETE" })
+        .reply(204, "");
+
+      await ctx.client.deleteJob("j1");
+    });
+
+    it("throws NotFoundError for missing job", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1", method: "DELETE" })
+        .reply(404, { error: "job not found" }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const { NotFoundError } = await import("./client.ts");
+      await assert.rejects(
+        () => ctx.client.deleteJob("j1"),
+        (err: unknown) => {
+          assert.ok(err instanceof NotFoundError);
+          return true;
+        }
+      );
+    });
+  });
+
+  describe("deleteAllJobs", () => {
+    it("deletes jobs matching filters and returns count", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?queue=emails&status=dead", method: "DELETE" })
+        .reply(200, { deleted: 5 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.deleteAllJobs({ queue: "emails", status: "dead" });
+      assert.equal(count, 5);
+    });
+
+    it("deletes all jobs when no filters given", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs", method: "DELETE" })
+        .reply(200, { deleted: 100 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.deleteAllJobs();
+      assert.equal(count, 100);
+    });
+
+    it("short-circuits on empty array filter without making a request", async () => {
+      // No mock — if a request was made, undici would error.
+      const count = await ctx.client.deleteAllJobs({ id: [] });
+      assert.equal(count, 0);
+    });
+
+    it("accepts scalar filter values", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?id=j1", method: "DELETE" })
+        .reply(200, { deleted: 1 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.deleteAllJobs({ id: "j1" });
+      assert.equal(count, 1);
+    });
+  });
+
   describe("listJobs", () => {
     it("returns a page of jobs", async () => {
       ctx.mockPool

@@ -220,6 +220,11 @@ export class Job {
     return this.client.reportFailure(this.id, options);
   }
 
+  /** Delete this job. */
+  async delete(): Promise<void> {
+    return this.client.deleteJob(this.id);
+  }
+
   /** Return the raw job data as a plain object. */
   toJSON(): JobData {
     return {
@@ -294,6 +299,17 @@ export class JobPage {
   /** Iterate over the jobs on this page. */
   [Symbol.iterator](): IterableIterator<Job> {
     return this.jobs[Symbol.iterator]();
+  }
+
+  /**
+   * Delete all jobs on this page.
+   *
+   * @returns The number of deleted jobs.
+   */
+  async deleteAll(): Promise<number> {
+    const ids = this.jobs.map((j) => j.id);
+    if (ids.length === 0) return 0;
+    return this.client.deleteAllJobs({ id: ids });
   }
 
   /**
