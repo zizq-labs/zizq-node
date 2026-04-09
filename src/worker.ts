@@ -209,7 +209,26 @@ export class Worker {
   private retryMaxDelay: number;
   private retryMultiplier: number;
   private handler: JobHandler;
+
+  // Two abort controllers for a coordinated two-phase shutdown:
+  //   - `abortController` is the user-facing signal, fired by `stop()`.
+  //     When it fires, the worker begins draining in-flight jobs and
+  //     flushing acks while the take stream is still alive.
+  //   - `streamController` is the internal signal passed to the take
+  //     request. It is only aborted *after* the drain + flush completes,
+  //     so the server keeps jobs as in-flight during the drain and
+  //     accepts the acks before the connection closes.
   private abortController: AbortController | null = null;
+  private streamController: AbortController | null = null;
+
+  // Set of promises for currently in-flight `processJob` tasks. Exposed
+  // as an instance field so the shutdown listener can drain them.
+  private inFlight = new Set<Promise<void>>();
+
+  // Promise representing the drain + flush + stream-abort sequence
+  // initiated by the shutdown listener. `run()` awaits this before
+  // returning so callers can observe any errors from the shutdown path.
+  private shutdownPromise: Promise<void> = Promise.resolve();
 
   // Bulk ack batching buffer.
   // Success acks are buffered and flushed in a single bulk request.
@@ -258,16 +277,29 @@ export class Worker {
    */
   async run(): Promise<void> {
     this.abortController = new AbortController();
+    this.inFlight = new Set();
+    this.shutdownPromise = Promise.resolve();
+
+    // When the user calls stop(), begin an async shutdown sequence:
+    // drain in-flight jobs, flush acks, then abort the stream. The
+    // stream stays alive during the drain so the server keeps jobs
+    // marked in-flight and accepts the acks.
+    this.abortController.signal.addEventListener(
+      "abort",
+      () => this.startShutdown(),
+      { once: true },
+    );
+
     let attempt = 0;
 
     while (!this.abortController.signal.aborted) {
-      const inFlight = new Set<Promise<void>>();
+      this.streamController = new AbortController();
 
       try {
         const takeOpts: TakeOptions = {
           prefetch: this.prefetch,
           queues: this.queues.length > 0 ? this.queues : undefined,
-          signal: this.abortController.signal,
+          signal: this.streamController.signal,
         };
 
         const stream = await this.client.take(takeOpts);
@@ -280,24 +312,27 @@ export class Worker {
         attempt = 0;
 
         for await (const job of stream) {
-          if (this.abortController.signal.aborted) break;
+          // Once stop() has been called, don't dispatch any more jobs.
+          // The shutdown listener is draining in-flight and will abort
+          // the stream when done. Keep reading so heartbeats flow and
+          // the connection stays alive during the drain.
+          if (this.abortController.signal.aborted) continue;
 
           const task = this.processJob(job).finally(() => {
-            inFlight.delete(task);
+            this.inFlight.delete(task);
           });
 
-          inFlight.add(task);
+          this.inFlight.add(task);
 
           // If we've hit concurrency limit, wait for one to finish.
-          if (inFlight.size >= this.concurrency) {
-            await Promise.race(inFlight);
+          if (this.inFlight.size >= this.concurrency) {
+            await Promise.race(this.inFlight);
           }
         }
       } catch (err) {
         if (this.abortController.signal.aborted) {
-          // Expected — stop() was called.
+          // Expected — stream aborted by the shutdown listener.
         } else if (err instanceof ClientError) {
-          // Client errors are not transient — don't reconnect.
           throw err;
         } else {
           attempt++;
@@ -309,22 +344,43 @@ export class Worker {
             `[zizq] disconnected from ${this.client.url} (attempt ${attempt}, reconnecting in ${delay}ms):`,
             err instanceof Error ? err.message : err,
           );
+
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
       }
-
-      // Drain remaining in-flight jobs from this connection.
-      if (inFlight.size > 0) {
-        await Promise.allSettled(inFlight);
-      }
     }
 
-    // Wait for any in-flight ack flush to complete, then flush any
-    // remaining acks that accumulated during the drain.
-    await this.ackFlushPromise;
-    await this.flushAcks();
+    // Wait for the shutdown sequence initiated by the listener to
+    // complete (drain + flush + stream abort).
+    await this.shutdownPromise;
     this.logger.info("[zizq] worker stopped");
+  }
+
+  /**
+   * Async sequence triggered by the shutdown listener when `stop()` is
+   * called. Drains in-flight jobs, flushes any pending acks, then aborts
+   * the take stream so the for-await loop in `run()` exits cleanly.
+   */
+  private startShutdown(): void {
+    this.shutdownPromise = (async () => {
+      try {
+        // Wait for in-flight jobs to finish. Loop because new ones may
+        // be dispatched while we're waiting (shouldn't happen since
+        // run() checks the abort flag, but belt and braces).
+        while (this.inFlight.size > 0) {
+          await Promise.allSettled(this.inFlight);
+        }
+
+        // Flush any pending acks while the stream is still alive.
+        await this.ackFlushPromise;
+        await this.flushAcks();
+      } finally {
+        // Finally, abort the take stream. This causes the for-await in
+        // run() to throw, which is caught as an expected shutdown.
+        this.streamController?.abort();
+      }
+    })();
   }
 
   /**

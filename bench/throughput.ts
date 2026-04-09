@@ -40,7 +40,11 @@ const client = new Client({url: URL, format: FORMAT, tls: TLS});
 
 // --- Enqueue Phase ---
 
-await client.deleteAllJobs({ where: { queue: "node/bench" } });
+const deleted = await client.deleteAllJobs({ where: { queue: "node/bench" } });
+
+if (deleted > 0) {
+  console.error(`Deleted ${deleted} leftover jobs from a previous run!`);
+}
 
 const enqueueStart = performance.now();
 
