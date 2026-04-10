@@ -50,8 +50,8 @@ export type {
   EnqueueTransform,
 } from "./handler.ts";
 
-export { ErrorQuery } from "./error-query.ts";
-export type { ErrorQueryOptions } from "./error-query.ts";
+export { Lazy, ErrorQuery, JobQuery } from "./query.ts";
+export type { ErrorQueryOptions, JobQueryOptions } from "./query.ts";
 
 export { enqueue, enqueueBulk } from "./enqueue.ts";
 

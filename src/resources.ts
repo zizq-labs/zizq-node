@@ -19,7 +19,7 @@ import type {
   FailureOptions,
   UpdateJobOptions,
 } from "./client.ts";
-import { ErrorQuery, type ErrorQueryOptions } from "./error-query.ts";
+import { ErrorQuery, type ErrorQueryOptions } from "./query.ts";
 
 // --- JobData ---
 

@@ -38,6 +38,7 @@ import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
 import { Job, JobPage, ErrorRecord, ErrorPage, type JobData, type ErrorRecordData } from "./resources.ts";
+import { JobQuery, type JobQueryOptions } from "./query.ts";
 
 /** Lifecycle status of a job. */
 export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
@@ -924,6 +925,38 @@ export class Client {
   async serverVersion(): Promise<string> {
     const data = await this.handleResponse(await this.request("GET", "/version")) as VersionResponse;
     return data.version;
+  }
+
+  /**
+   * Start a composable, lazy query over jobs.
+   *
+   * Returns a {@link JobQuery} that can be chained with filter and
+   * ordering methods, then iterated or used with terminal methods like
+   * `first()`, `toArray()`, `updateAll()`, and `deleteAll()`.
+   *
+   * No HTTP request is made until the query is consumed.
+   *
+   * Accepts an optional {@link JobQueryOptions} to seed the query's initial
+   * filter, order, limit, and page size — handy as a shorthand for
+   * `client.jobs().byQueue(...).limit(...)` etc.
+   *
+   * @example
+   * ```ts
+   * const dead = await client.jobs()
+   *   .byQueue("emails")
+   *   .byStatus("dead")
+   *   .toArray();
+   *
+   * // Shorthand with seeded options
+   * const ready = await client.jobs({ queue: "emails", status: "ready" }).toArray();
+   *
+   * for await (const job of client.jobs().byStatus("ready")) {
+   *   console.log(job.id);
+   * }
+   * ```
+   */
+  jobs(options?: JobQueryOptions): JobQuery {
+    return new JobQuery(this, options);
   }
 
   /**
