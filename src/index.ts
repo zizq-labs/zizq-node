@@ -47,6 +47,7 @@ export type {
   JobFunction,
   JobHandler,
   ZizqOptions,
+  EnqueueTransform,
 } from "./handler.ts";
 
 export { ErrorQuery } from "./error-query.ts";
@@ -55,3 +56,5 @@ export type { ErrorQueryOptions } from "./error-query.ts";
 export { enqueue, enqueueBulk } from "./enqueue.ts";
 
 export type { EnqueueInput } from "./enqueue.ts";
+
+export { uniqueKey } from "./unique-key.ts";

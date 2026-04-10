@@ -14,6 +14,7 @@
 
 import type {
   BackoffConfig,
+  EnqueueOptions,
   RetentionConfig,
   UniqueScope,
 } from "./client.ts";
@@ -65,13 +66,68 @@ export interface ZizqOptions {
    * Unique key for deduplication.
    *
    * Can be a static string or a function that computes the key from the
-   * payload at enqueue time.
+   * job function (for metadata like the type name) and the payload at
+   * enqueue time.
+   *
+   * For common cases, use the `uniqueKey(...fields)` helper from this
+   * module, which returns a resolver that picks fields from the payload
+   * and prefixes the job type automatically.
    */
-  uniqueKey?: string | ((payload: unknown) => string);
+  uniqueKey?: string | ((fn: JobFunction, payload: unknown) => string);
 
   /** Uniqueness scope. Only used when `uniqueKey` is set. */
   uniqueWhile?: UniqueScope;
+
+  /**
+   * Final transform applied to the resolved enqueue options before it is sent
+   * to the server.
+   *
+   * Receives the fully-resolved `EnqueueOptions` (with defaults and
+   * inline overrides already merged) along with the job payload. The transform
+   * can mutate the options in place, or return a new object.
+   *
+   * Useful for dynamic adjustments that need to see the already-computed
+   * values e.g. lowering priority for "important" payloads relative
+   * to the default priority.
+   *
+   * @example
+   * ```ts
+   * sendEmail.zizqOptions = {
+   *   queue: "emails",
+   *   priority: 100,
+   *   transform: (opts, payload) => {
+   *     if ((payload as any).urgent) {
+   *       opts.priority = Math.floor(opts.priority! / 2);
+   *     }
+   *   },
+   * };
+   * ```
+   *
+   * @example Composing multiple transforms
+   * ```ts
+   * function compose(...transforms: EnqueueTransform[]): EnqueueTransform {
+   *   return (opts, payload) => {
+   *     for (const t of transforms) opts = t(opts, payload);
+   *     return opts;
+   *   };
+   * }
+   *
+   * sendEmail.zizqOptions = {
+   *   transform: compose(doublePriority, tagWithUser),
+   * };
+   * ```
+   */
+  transform?: EnqueueTransform;
 }
+
+/**
+ * A final transform applied to a resolved enqueue options before it is
+ * sent to the server. May mutate `opts` in place, or return a new optsuest.
+ */
+export type EnqueueTransform = (
+  opts: EnqueueOptions,
+  payload: unknown,
+) => EnqueueOptions | void;
 
 /**
  * Top-level function that processes a single job dispatched by the worker.
@@ -117,7 +173,10 @@ export type JobHandler = (job: Job) => Promise<void> | void;
  * into a single `JobHandler` for the `Worker`.
  */
 export interface JobFunction {
+  /** Function signature for the handler function. */
   (payload: unknown, job: Job): Promise<void> | void;
+
+  /** Optional defaults and configuration for this job */
   zizqOptions?: ZizqOptions;
 }
 

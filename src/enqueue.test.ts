@@ -5,6 +5,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { enqueue, enqueueBulk } from "./enqueue.ts";
 import type { JobFunction } from "./handler.ts";
+import { uniqueKey } from "./unique-key.ts";
 import { createMockContext, type MockContext } from "./test-helpers.ts";
 
 describe("enqueue", () => {
@@ -102,9 +103,73 @@ describe("enqueue", () => {
     );
   });
 
-  it("resolves uniqueKey from function", async () => {
+  it("resolves uniqueKey from a user function (no type prefix)", async () => {
+    let captured: any;
     ctx.mockPool
-      .intercept({ path: "/jobs", method: "POST" })
+      .intercept({
+        path: "/jobs",
+        method: "POST",
+        body: (body: string) => {
+          captured = JSON.parse(body);
+          return true;
+        },
+      })
+      .reply(201, jobResponse, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const handler: JobFunction = async () => {};
+    handler.zizqOptions = {
+      type: "sendEmail",
+      queue: "q",
+      // A plain user function: receives (fn, payload) and returns a string.
+      uniqueKey: (_fn, payload: any) => `user-${payload.userId}`,
+      uniqueWhile: "active",
+    };
+
+    await enqueue(ctx.client, { type: handler, payload: { userId: 42 } });
+    assert.equal(captured.unique_key, "user-42");
+  });
+
+  it("resolves uniqueKey helper with type prefix", async () => {
+    let captured: any;
+    ctx.mockPool
+      .intercept({
+        path: "/jobs",
+        method: "POST",
+        body: (body: string) => {
+          captured = JSON.parse(body);
+          return true;
+        },
+      })
+      .reply(201, jobResponse, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const handler: JobFunction = async () => {};
+    handler.zizqOptions = {
+      type: "sendEmail",
+      queue: "q",
+      uniqueKey: uniqueKey("userId"),
+    };
+
+    await enqueue(ctx.client, { type: handler, payload: { userId: 42, junk: "ignored" } });
+    const [prefix, digest] = captured.unique_key.split(":");
+    assert.equal(prefix, "sendEmail");
+    assert.match(digest, /^[a-f0-9]{64}$/);
+  });
+
+  it("applies a transform to mutate the resolved request", async () => {
+    let captured: any;
+    ctx.mockPool
+      .intercept({
+        path: "/jobs",
+        method: "POST",
+        body: (body: string) => {
+          captured = JSON.parse(body);
+          return true;
+        },
+      })
       .reply(201, jobResponse, {
         headers: { "content-type": "application/json" },
       });
@@ -112,11 +177,42 @@ describe("enqueue", () => {
     const handler: JobFunction = async () => {};
     handler.zizqOptions = {
       queue: "q",
-      uniqueKey: (payload: any) => `user-${payload.userId}`,
-      uniqueWhile: "active",
+      priority: 100,
+      transform: (opts, payload) => {
+        if ((payload as any).urgent) {
+          opts.priority = Math.floor(opts.priority! / 2);
+        }
+      },
     };
 
-    await enqueue(ctx.client, { type: handler, payload: { userId: 42 } });
+    await enqueue(ctx.client, { type: handler, payload: { urgent: true } });
+    assert.equal(captured.priority, 50);
+  });
+
+  it("supports transform returning a new request", async () => {
+    let captured: any;
+    ctx.mockPool
+      .intercept({
+        path: "/jobs",
+        method: "POST",
+        body: (body: string) => {
+          captured = JSON.parse(body);
+          return true;
+        },
+      })
+      .reply(201, jobResponse, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const handler: JobFunction = async () => {};
+    handler.zizqOptions = {
+      queue: "q",
+      priority: 100,
+      transform: (opts) => ({ ...opts, priority: 999 }),
+    };
+
+    await enqueue(ctx.client, { type: handler, payload: {} });
+    assert.equal(captured.priority, 999);
   });
 });
 

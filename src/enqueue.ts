@@ -18,11 +18,11 @@ import type { JobFunction, ZizqOptions } from "./handler.ts";
  * Input for enqueueing a job.
  *
  * The `type` field accepts either a string job type name or a function
- * reference with optional `zizqOptions`. When a function is provided, its
- * `zizqOptions` supplies defaults for `queue`, `priority`, etc. Inline
- * fields on this object take precedence over `zizqOptions` defaults.
+ * reference with optional attached `zizqOptions`. When a function is provided,
+ * its `zizqOptions` supplies defaults for `queue`, `priority`, etc. These
+ * defaults can be overridden by inputs specified at enqueue-time.
  *
- * When `type` is a string, `queue` is required.
+ * When `type` is a string, `queue` is required in the inputs.
  *
  * @example Function reference
  * ```ts
@@ -155,22 +155,23 @@ export async function enqueueBulk(
 
 // --- Internal ---
 
-// Compute the unique key from ZizqOptions + payload.
+// Compute the unique key from a job function's ZizqOptions + payload.
+//
+// The function form is called with `(jobFn, payload)` so resolvers
+// can read metadata (like the type name) from the job function itself.
 function computeUniqueKey(
-  opts: ZizqOptions | undefined,
+  jobFn: JobFunction,
   payload: unknown,
 ): string | undefined {
-  if (!opts?.uniqueKey) return undefined;
-
-  if (typeof opts.uniqueKey === "function") {
-    return opts.uniqueKey(payload);
-  }
-
-  return opts.uniqueKey;
+  const uniqueKey = jobFn.zizqOptions?.uniqueKey;
+  if (!uniqueKey) return undefined;
+  if (typeof uniqueKey === "function") return uniqueKey(jobFn, payload);
+  return uniqueKey;
 }
 
-// Resolve an EnqueueInput into a low-level EnqueueOptions by merging
-// inline fields with zizqOptions defaults.
+// Resolve an EnqueueInput into a low-level EnqueueOptions by taking the
+// result of zizqOptions (if provided), optionally transformed, and then
+// merging over the top any overrides present in the input.
 function resolveInput(input: EnqueueInput): EnqueueOptions {
   let jobType: string;
   let defaults: ZizqOptions | undefined;
@@ -195,12 +196,15 @@ function resolveInput(input: EnqueueInput): EnqueueOptions {
   }
 
   const uniqueKey =
-    input.uniqueKey ?? computeUniqueKey(defaults, input.payload);
+    input.uniqueKey ??
+    (typeof input.type === "function"
+      ? computeUniqueKey(input.type, input.payload)
+      : undefined);
 
   const uniqueWhile =
     input.uniqueWhile ?? defaults?.uniqueWhile;
 
-  return {
+  const opts: EnqueueOptions = {
     type: jobType,
     queue,
     payload: input.payload,
@@ -212,4 +216,14 @@ function resolveInput(input: EnqueueInput): EnqueueOptions {
     uniqueKey,
     uniqueWhile: uniqueKey ? uniqueWhile : undefined,
   };
+
+  // Apply the transform hook (if any). Transforms can change the options based
+  // on the payload or other factors, and can mutate `opts` in place, or return
+  // a new object to use instead.
+  if (defaults?.transform) {
+    const result = defaults.transform(opts, input.payload);
+    return result ?? opts;
+  }
+
+  return opts;
 }
