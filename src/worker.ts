@@ -232,6 +232,18 @@ export class Worker {
   // returning so callers can observe any errors from the shutdown path.
   private shutdownPromise: Promise<void> = Promise.resolve();
 
+  // Set to `true` when `kill()` is called. The drain loop in
+  // `startShutdown` checks this to bail out early, and `kill()` itself
+  // aborts `streamController` directly so the take loop exits without
+  // waiting for the drain.
+  //
+  // `killDeferred` is a promise that resolves when `kill()` is called.
+  // The drain loop races against it so it wakes up immediately on kill,
+  // otherwise a slow in-flight job could keep the drain loop blocked
+  // on `Promise.allSettled` for an unbounded amount of time.
+  private killing = false;
+  private killDeferred = Promise.withResolvers<void>();
+
   // Bulk ack batching buffer.
   // Success acks are buffered and flushed in a single bulk request.
   // The bulk ack is scheduled via queueMicrotask and only one bulk ack runs at
@@ -368,46 +380,95 @@ export class Worker {
     this.streamController = new AbortController();
     this.inFlight = new Set();
     this.shutdownPromise = Promise.resolve();
+    this.killing = false;
+    this.killDeferred = Promise.withResolvers<void>();
     this.pendingAcks = [];
     this.ackFlushInFlight = false;
     this.ackFlushPromise = Promise.resolve();
   }
 
   /**
-   * Async sequence triggered by the shutdown listener when `stop()` is
-   * called. Drains in-flight jobs, flushes any pending acks, then aborts
-   * the take stream so the for-await loop in `run()` exits cleanly.
+   * Async sequence triggered by the shutdown listener when `stop()` or
+   * `kill()` is called. On a graceful stop, drains in-flight jobs and
+   * flushes pending acks before aborting the take stream. On kill, the
+   * drain loop bails out early via the `killing` flag, any pending
+   * acks are dropped, and the stream is (already) aborted by `kill()`
+   * itself.
+   *
+   * The drain loop races `Promise.allSettled(inFlight)` against
+   * `killDeferred.promise` so that a `kill()` call mid-drain wakes the
+   * loop immediately, rather than having to wait for an in-flight
+   * handler to finish before noticing.
    */
   private startShutdown(): void {
     this.shutdownPromise = (async () => {
       try {
-        // Wait for in-flight jobs to finish. Loop because new ones may
-        // be dispatched while we're waiting (shouldn't happen since
-        // run() checks the abort flag, but belt and braces).
-        while (this.inFlight.size > 0) {
-          await Promise.allSettled(this.inFlight);
+        // Drain in-flight jobs, bailing out early if kill() is called.
+        while (this.inFlight.size > 0 && !this.killing) {
+          await Promise.race([
+            Promise.allSettled([...this.inFlight]),
+            this.killDeferred.promise,
+          ]);
         }
 
-        // Flush any pending acks while the stream is still alive.
-        await this.ackFlushPromise;
-        await this.flushAcks();
+        if (!this.killing) {
+          // Graceful path: flush any pending acks while the stream is
+          // still alive.
+          await this.ackFlushPromise;
+          await this.flushAcks();
+        }
       } finally {
-        // Finally, abort the take stream. This causes the for-await in
-        // run() to throw, which is caught as an expected shutdown.
-        this.streamController?.abort();
+        // Abort the take stream. Idempotent — if kill() already aborted
+        // it, this call is a no-op.
+        this.streamController.abort();
       }
     })();
   }
 
   /**
-   * Signal the worker to stop processing.
+   * Request a graceful shutdown.
    *
-   * Aborts the take stream so no new jobs are received. The {@link run}
-   * method will wait for any in-flight jobs to finish before returning.
+   * Stops dispatching new jobs, waits for all in-flight job handlers to
+   * finish, flushes any pending acks, and then aborts the take stream.
+   * {@link run} returns once all of that has drained. `stop` is patient
+   * — there is no internal deadline. If you need to bound how long
+   * shutdown can take, use {@link kill} as an escalation.
+   *
+   * Callable any number of times; subsequent calls are no-ops.
    */
   stop(): void {
     this.logger.info("[zizq] stopping worker...");
-    this.abortController?.abort();
+    if (!this.abortController.signal.aborted) {
+      this.abortController.abort();
+    }
+  }
+
+  /**
+   * Force an immediate shutdown.
+   *
+   * Aborts the take stream right away and skips the drain + flush
+   * steps. Any in-flight job handlers that are already running will
+   * continue to completion. JavaScript can't cancel promises, but
+   * their acks will not be flushed, so the server will re-queue the
+   * corresponding jobs once the worker disconnects.
+   *
+   * Safe to call after `stop()` has already been called; this is the
+   * deadline-escalation path. A `stop()` drain that's been running too
+   * long will wake up immediately once `kill()` is called, and
+   * {@link run} returns shortly after.
+   */
+  kill(): void {
+    this.logger.info("[zizq] killing worker...");
+    this.killing = true;
+    // Wake the drain loop in startShutdown() if it's blocked on
+    // Promise.allSettled.
+    this.killDeferred.resolve();
+    // Close the stream immediately so the take loop exits.
+    this.streamController.abort();
+    // Trigger startShutdown if stop() hasn't been called yet.
+    if (!this.abortController.signal.aborted) {
+      this.abortController.abort();
+    }
   }
 
   /**
