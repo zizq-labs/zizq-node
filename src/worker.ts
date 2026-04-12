@@ -218,8 +218,10 @@ export class Worker {
   //     request. It is only aborted *after* the drain + flush completes,
   //     so the server keeps jobs as in-flight during the drain and
   //     accepts the acks before the connection closes.
-  private abortController: AbortController | null = null;
-  private streamController: AbortController | null = null;
+  //
+  // Reassigned fresh on every `run()` via `resetRuntimeState()`.
+  private abortController: AbortController = new AbortController();
+  private streamController: AbortController = new AbortController();
 
   // Set of promises for currently in-flight `processJob` tasks. Exposed
   // as an instance field so the shutdown listener can drain them.
@@ -276,9 +278,7 @@ export class Worker {
    * ```
    */
   async run(): Promise<void> {
-    this.abortController = new AbortController();
-    this.inFlight = new Set();
-    this.shutdownPromise = Promise.resolve();
+    this.resetRuntimeState();
 
     // When the user calls stop(), begin an async shutdown sequence:
     // drain in-flight jobs, flush acks, then abort the stream. The
@@ -355,6 +355,22 @@ export class Worker {
     // complete (drain + flush + stream abort).
     await this.shutdownPromise;
     this.logger.info("[zizq] worker stopped");
+  }
+
+  /**
+   * Reset all mutable runtime state so {@link run} can be called
+   * multiple times on the same Worker instance. Called from the top of
+   * {@link run}. Config (client, handler, concurrency, etc.) is
+   * preserved; only per-run state is wiped.
+   */
+  private resetRuntimeState(): void {
+    this.abortController = new AbortController();
+    this.streamController = new AbortController();
+    this.inFlight = new Set();
+    this.shutdownPromise = Promise.resolve();
+    this.pendingAcks = [];
+    this.ackFlushInFlight = false;
+    this.ackFlushPromise = Promise.resolve();
   }
 
   /**
