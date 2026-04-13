@@ -76,6 +76,7 @@ const dequeueStart = performance.now();
 
 const worker = new Worker({
   client,
+  queues: ["node/bench"],
   concurrency: CONCURRENCY,
   prefetch: PREFETCH,
   handler: async (job) => {
