@@ -20,7 +20,7 @@
     "test": "node --test --experimental-strip-types 'src/**/*.test.ts'"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19"
   },
   "license": "MIT",
   "dependencies": {
