@@ -32,6 +32,10 @@ if [[ "${1:-}" == "--check" ]]; then
     npm test
 fi
 
+# Install dependencies (needed for TypeScript compilation).
+echo "    Installing dependencies..."
+npm ci
+
 # Compile TypeScript → dist/.
 echo "    Compiling..."
 npm run build
