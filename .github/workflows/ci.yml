@@ -30,6 +30,7 @@ jobs:
     needs: typecheck
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node-version: ["22.19", "24", "25.9", "latest"]
     steps:
@@ -49,3 +50,72 @@ jobs:
 
       - name: Test
         run: npm test
+
+  package:
+    name: Package
+    needs: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: latest
+          cache: npm
+
+      - name: Build release artifact
+        run: ./release.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: zizq-node-package
+          path: target/release/zizq-*.tgz
+
+  integration:
+    name: Integration
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout for integration test scripts only. No npm ci here —
+      # the integration test installs from the artifact in a clean
+      # temp directory.
+      - uses: actions/checkout@v5
+        with:
+          path: client
+
+      - name: Read client version
+        id: client-version
+        working-directory: client
+        run: |
+          version=$(node -e 'process.stdout.write(require("./package.json").version)')
+          major=${version%%.*}
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "major=${major}" >> "$GITHUB_OUTPUT"
+
+      - name: Find and download latest compatible server build
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          client/.github/scripts/find-server-build.sh \
+            ${{ steps.client-version.outputs.major }} \
+            server
+
+      - name: Download client artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: zizq-node-package
+          path: artifact
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: latest
+
+      - name: Run integration tests
+        working-directory: client
+        run: |
+          ./integration/run.sh \
+            --binary ${{ github.workspace }}/server/zizq \
+            --tarball ${{ github.workspace }}/artifact/zizq-*.tgz
