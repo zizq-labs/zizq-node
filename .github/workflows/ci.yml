@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   typecheck:
     name: Type Check
@@ -55,6 +58,8 @@ jobs:
     name: Package
     needs: typecheck
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
@@ -64,6 +69,10 @@ jobs:
           node-version: latest
           cache: npm
 
+      - name: Read version
+        id: version
+        run: echo "version=$(node -e 'process.stdout.write(require("./package.json").version)')" >> "$GITHUB_OUTPUT"
+
       - name: Build release artifact
         run: ./release.sh
 
@@ -71,16 +80,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: zizq-node-package
-          path: target/release/zizq-*.tgz
+          path: |
+            target/release/zizq-*.tgz
+            target/release/zizq-*.tgz.sha256
 
   integration:
     name: Integration
     needs: package
     runs-on: ubuntu-latest
     steps:
-      # Checkout for integration test scripts only. No npm ci here —
-      # the integration test installs from the artifact in a clean
-      # temp directory.
       - uses: actions/checkout@v5
         with:
           path: client
@@ -119,3 +127,35 @@ jobs:
           ./integration/run.sh \
             --binary ${{ github.workspace }}/server/zizq \
             --tarball ${{ github.workspace }}/artifact/zizq-*.tgz
+
+  # --- Publish GitHub Release (main only, requires approval) ---
+
+  publish:
+    name: Publish Release
+    needs: [test, package, integration]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download package artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: zizq-node-package
+          path: artifacts
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version=${{ needs.package.outputs.version }}
+          sed -n "/^## ${version}/,/^## /p" CHANGELOG.md | head -n -1 | tail -n +2 > release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${{ needs.package.outputs.version }}
+          gh release create "v${version}" \
+            --title "v${version}" \
+            --notes-file release-notes.md \
+            artifacts/zizq-*
