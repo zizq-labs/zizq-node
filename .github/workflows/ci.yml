@@ -159,3 +159,16 @@ jobs:
             --title "v${version}" \
             --notes-file release-notes.md \
             artifacts/zizq-*
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: latest
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish to NPM
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version=${{ needs.package.outputs.version }}
+          npm publish "./artifacts/zizq-${version}.tgz" --access public
