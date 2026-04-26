@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+
+## 0.1.1
+
+- Package metadata additions
+
 ## 0.1.0
 
 - Initial release
