@@ -385,6 +385,36 @@ describe("Client", () => {
     });
   });
 
+  describe("countJobs", () => {
+    it("returns the count from the server", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count?queue=emails", method: "GET" })
+        .reply(200, { count: 42 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.countJobs({ queue: "emails" });
+      assert.equal(count, 42);
+    });
+
+    it("counts all jobs when no filters given", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count", method: "GET" })
+        .reply(200, { count: 100 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.countJobs();
+      assert.equal(count, 100);
+    });
+
+    it("short-circuits on empty array filter", async () => {
+      // No mock — if a request was made, undici would error.
+      const count = await ctx.client.countJobs({ queue: [] });
+      assert.equal(count, 0);
+    });
+  });
+
   describe("listJobs", () => {
     it("returns a page of jobs", async () => {
       ctx.mockPool
@@ -465,6 +495,13 @@ describe("Client", () => {
 
       const next = await page.nextPage();
       assert.equal(next, null);
+    });
+
+    it("short-circuits on empty array filter", async () => {
+      // No mock — if a request was made, undici would error.
+      const page = await ctx.client.listJobs({ queue: [] });
+      assert.deepEqual(page.jobs, []);
+      assert.equal(page.hasNext, false);
     });
 
     it("jobs on page are Job instances", async () => {

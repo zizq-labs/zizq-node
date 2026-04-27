@@ -513,6 +513,20 @@ export class JobQuery extends Lazy<Job> {
     return this.limit(1).deleteAll();
   }
 
+  /**
+   * Count matching jobs using the server-side count endpoint.
+   *
+   * This overrides the base `Lazy.count()` with a single HTTP request to
+   * `GET /jobs/count` instead of paginating through all results.
+   *
+   * When a `limit` is set, caps the server-side count locally with
+   * `Math.min()` rather than paginating.
+   */
+  override async count(): Promise<number> {
+    const total = await this.client.countJobs(this.toWhere());
+    return this._limit != null ? Math.min(total, this._limit) : total;
+  }
+
   // --- Iteration ---
 
   /**

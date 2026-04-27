@@ -394,6 +394,7 @@ export interface DeleteAllJobsOptions {
   where?: JobFilter;
 }
 
+
 // --- API response shapes (used internally for type-safe casting) ---
 
 /** Response shape for `GET /jobs`. */
@@ -420,6 +421,11 @@ interface QueuesResponse {
 /** Response shape for `DELETE /jobs`. */
 interface DeleteJobsResponse {
   deleted: number;
+}
+
+/** Response shape for `GET /jobs/count`. */
+interface CountJobsResponse {
+  count: number;
 }
 
 /** Response shape for `PATCH /jobs`. */
@@ -763,22 +769,11 @@ export class Client {
     const where = options.where ?? {};
     assertOnlyKeys("deleteAllJobs.where", where, ["id", "status", "queue", "type", "filter"]);
 
-    // Build the multi-value filters first so we can short-circuit if any
-    // resolves to an empty string. An empty filter matches nothing — we
-    // don't want to pass it as "no filter" and accidentally delete everything.
-    const id = where.id != null ? toCommaList(where.id) : undefined;
-    const status = where.status != null ? toCommaList(where.status) : undefined;
-    const queue = where.queue != null ? toCommaList(where.queue) : undefined;
-    const type = where.type != null ? toCommaList(where.type) : undefined;
-
-    if (id === "" || status === "" || queue === "" || type === "") return 0;
-
-    const params = new URLSearchParams();
-    if (id != null) params.set("id", id);
-    if (status != null) params.set("status", status);
-    if (queue != null) params.set("queue", queue);
-    if (type != null) params.set("type", type);
-    if (where.filter != null) params.set("filter", where.filter);
+    // Build the filter params, then short-circuit if any array filter resolved
+    // to empty — an empty filter matches nothing, and we don't want to
+    // accidentally delete everything.
+    const params = buildJobFilter(where);
+    if (isEmptyFilter(params)) return 0;
 
     const qs = params.toString();
     const path = `/jobs${qs ? "?" + qs : ""}`;
@@ -788,6 +783,31 @@ export class Client {
     ) as DeleteJobsResponse;
 
     return data.deleted;
+  }
+
+  /**
+   * Count jobs matching the given filters.
+   *
+   * @example
+   * ```ts
+   * // Count all ready jobs in the emails queue
+   * const count = await client.countJobs({ queue: "emails", status: "ready" });
+   * ```
+   */
+  async countJobs(where: JobFilter = {}): Promise<number> {
+    assertOnlyKeys("countJobs", where, ["id", "status", "queue", "type", "filter"]);
+
+    const params = buildJobFilter(where);
+    if (isEmptyFilter(params)) return 0;
+
+    const qs = params.toString();
+    const path = `/jobs/count${qs ? "?" + qs : ""}`;
+
+    const data = await this.handleResponse(
+      await this.request("GET", path)
+    ) as CountJobsResponse;
+
+    return data.count;
   }
 
   /**
@@ -838,19 +858,8 @@ export class Client {
     assertOnlyKeys("updateAllJobs.where", where, ["id", "status", "queue", "type", "filter"]);
 
     // Same empty-filter short-circuit as deleteAllJobs.
-    const id = where.id != null ? toCommaList(where.id) : undefined;
-    const status = where.status != null ? toCommaList(where.status) : undefined;
-    const queue = where.queue != null ? toCommaList(where.queue) : undefined;
-    const type = where.type != null ? toCommaList(where.type) : undefined;
-
-    if (id === "" || status === "" || queue === "" || type === "") return 0;
-
-    const params = new URLSearchParams();
-    if (id != null) params.set("id", id);
-    if (status != null) params.set("status", status);
-    if (queue != null) params.set("queue", queue);
-    if (type != null) params.set("type", type);
-    if (where.filter != null) params.set("filter", where.filter);
+    const params = buildJobFilter(where);
+    if (isEmptyFilter(params)) return 0;
 
     const qs = params.toString();
     const path = `/jobs${qs ? "?" + qs : ""}`;
@@ -885,11 +894,9 @@ export class Client {
     if (options.from != null) params.set("from", options.from);
     if (options.order != null) params.set("order", options.order);
     if (options.limit != null) params.set("limit", String(options.limit));
-    if (options.status) params.set("status", toCommaList(options.status));
-    if (options.queue) params.set("queue", toCommaList(options.queue));
-    if (options.type) params.set("type", toCommaList(options.type));
-    if (options.id) params.set("id", toCommaList(options.id));
-    if (options.filter != null) params.set("filter", options.filter);
+    buildJobFilter(options, params);
+
+    if (isEmptyFilter(params)) return new JobPage(this, [], {});
 
     const qs = params.toString();
     const path = `/jobs${qs ? "?" + qs : ""}`;
@@ -1275,6 +1282,37 @@ export class Client {
 /** Normalize a scalar or array to a comma-separated string. */
 function toCommaList(value: string | string[]): string {
   return Array.isArray(value) ? value.join(",") : value;
+}
+
+/**
+ * Returns `true` when any array filter field resolved to an empty comma list,
+ * meaning the filter matches nothing and the caller can short-circuit.
+ *
+ * Call after {@link buildJobFilter} has populated the params.
+ */
+function isEmptyFilter(params: URLSearchParams): boolean {
+  return (
+    params.get("id") === "" ||
+    params.get("status") === "" ||
+    params.get("queue") === "" ||
+    params.get("type") === ""
+  );
+}
+
+/**
+ * Populate a {@link URLSearchParams} with the standard job filter fields.
+ */
+function buildJobFilter(
+  where: JobFilter,
+  params: URLSearchParams = new URLSearchParams(),
+): URLSearchParams {
+  if (where.id != null) params.set("id", toCommaList(where.id));
+  if (where.status != null) params.set("status", toCommaList(where.status));
+  if (where.queue != null) params.set("queue", toCommaList(where.queue));
+  if (where.type != null) params.set("type", toCommaList(where.type));
+  if (where.filter != null) params.set("filter", where.filter);
+
+  return params;
 }
 
 /**

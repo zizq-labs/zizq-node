@@ -506,31 +506,26 @@ describe("JobQuery", () => {
     assert.deepEqual(seen, ["j1", "j2"]);
   });
 
-  it("count() sums page sizes without materialising jobs", async () => {
+  it("count() hits /jobs/count instead of paginating", async () => {
     ctx.mockPool
-      .intercept({ path: "/jobs?limit=2", method: "GET" })
-      .reply(200, {
-        jobs: [mockJob("j1"), mockJob("j2")],
-        pages: { self: "/jobs?limit=2", next: "/jobs?from=j2&limit=2" },
-      }, { headers: { "content-type": "application/json" } });
+      .intercept({ path: "/jobs/count", method: "GET" })
+      .reply(200, { count: 42 }, { headers: { "content-type": "application/json" } });
 
+    assert.equal(await ctx.client.jobs().count(), 42);
+  });
+
+  it("count() passes filters to /jobs/count", async () => {
     ctx.mockPool
-      .intercept({ path: "/jobs?from=j2&limit=2", method: "GET" })
-      .reply(200, {
-        jobs: [mockJob("j3")],
-        pages: { self: "/jobs?from=j2&limit=2" },
-      }, { headers: { "content-type": "application/json" } });
+      .intercept({ path: "/jobs/count?queue=default&status=pending", method: "GET" })
+      .reply(200, { count: 7 }, { headers: { "content-type": "application/json" } });
 
-    assert.equal(await ctx.client.jobs().inPagesOf(2).count(), 3);
+    assert.equal(await ctx.client.jobs().byQueue("default").byStatus("pending").count(), 7);
   });
 
   it("count() caps at the configured limit", async () => {
     ctx.mockPool
-      .intercept({ path: "/jobs?limit=2", method: "GET" })
-      .reply(200, {
-        jobs: [mockJob("j1"), mockJob("j2")],
-        pages: { self: "/jobs?limit=2" },
-      }, { headers: { "content-type": "application/json" } });
+      .intercept({ path: "/jobs/count", method: "GET" })
+      .reply(200, { count: 10 }, { headers: { "content-type": "application/json" } });
 
     assert.equal(await ctx.client.jobs().limit(2).count(), 2);
   });
