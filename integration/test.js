@@ -160,4 +160,132 @@ describe("integration", { concurrency: 1 }, () => {
     assert.equal(await client.jobs().count(), 3);
     assert.equal(await client.jobs().byType("count_b").count(), 1);
   });
+
+  it("query with jq filter", async () => {
+    await enqueueBulk(client, [
+      { type: "jq_test", queue: "integration", payload: { priority: "high", region: "eu" } },
+      { type: "jq_test", queue: "integration", payload: { priority: "low", region: "eu" } },
+      { type: "jq_test", queue: "integration", payload: { priority: "high", region: "us" } },
+    ]);
+
+    const highPriority = await client.jobs()
+      .addJqFilter('.priority == "high"')
+      .toArray();
+    assert.equal(highPriority.length, 2);
+
+    const highEu = await client.jobs()
+      .addJqFilter('.priority == "high"')
+      .addJqFilter('.region == "eu"')
+      .first();
+    assert.ok(highEu);
+    assert.deepEqual(highEu.payload, { priority: "high", region: "eu" });
+  });
+
+  it("query with withPayload (exact match)", async () => {
+    await enqueueBulk(client, [
+      { type: "wp_test", queue: "integration", payload: { action: "send", to: "alice" } },
+      { type: "wp_test", queue: "integration", payload: { action: "send", to: "bob" } },
+      { type: "wp_test", queue: "integration", payload: { action: "receive", to: "alice" } },
+    ]);
+
+    const match = await client.jobs()
+      .withPayload({ action: "send", to: "alice" })
+      .toArray();
+    assert.equal(match.length, 1);
+    assert.deepEqual(match[0].payload, { action: "send", to: "alice" });
+  });
+
+  it("query with withPayloadSubset (partial match)", async () => {
+    await enqueueBulk(client, [
+      { type: "wps_test", queue: "integration", payload: { kind: "email", to: "alice", urgent: true } },
+      { type: "wps_test", queue: "integration", payload: { kind: "email", to: "bob", urgent: false } },
+      { type: "wps_test", queue: "integration", payload: { kind: "sms", to: "alice", urgent: true } },
+    ]);
+
+    // Subset match — any email.
+    const emails = await client.jobs()
+      .withPayloadSubset({ kind: "email" })
+      .toArray();
+    assert.equal(emails.length, 2);
+
+    // Subset match — urgent emails only.
+    const urgentEmails = await client.jobs()
+      .withPayloadSubset({ kind: "email", urgent: true })
+      .toArray();
+    assert.equal(urgentEmails.length, 1);
+    assert.equal(urgentEmails[0].payload.to, "alice");
+  });
+
+  it("delete all jobs", async () => {
+    await enqueueBulk(client, [
+      { type: "del_a", queue: "q1", payload: {} },
+      { type: "del_b", queue: "q1", payload: {} },
+      { type: "del_c", queue: "q2", payload: {} },
+    ]);
+
+    // Filtered delete — only q1.
+    const deleted = await client.deleteAllJobs({ where: { queue: "q1" } });
+    assert.equal(deleted, 2);
+    assert.equal(await client.countJobs(), 1);
+
+    // Unfiltered delete — everything remaining.
+    const deletedAll = await client.deleteAllJobs();
+    assert.equal(deletedAll, 1);
+    assert.equal(await client.countJobs(), 0);
+  });
+
+  it("update a job", async () => {
+    const job = await enqueue(client, {
+      type: "update_test",
+      queue: "integration",
+      payload: { x: 1 },
+      priority: 100,
+    });
+
+    const updated = await client.updateJob(job.id, { priority: 50 });
+    assert.equal(updated.id, job.id);
+    assert.equal(updated.priority, 50);
+
+    const fetched = await client.getJob(job.id);
+    assert.equal(fetched.priority, 50);
+  });
+
+  it("update all jobs", async () => {
+    await enqueueBulk(client, [
+      { type: "upd_a", queue: "q1", payload: {}, priority: 100 },
+      { type: "upd_b", queue: "q1", payload: {}, priority: 100 },
+      { type: "upd_c", queue: "q2", payload: {}, priority: 100 },
+    ]);
+
+    // Filtered update — only q1.
+    const patched = await client.updateAllJobs({
+      where: { queue: "q1" },
+      apply: { priority: 1 },
+    });
+    assert.equal(patched, 2);
+
+    // Verify the update applied to q1 and not q2.
+    const q1Job = await client.jobs().byQueue("q1").first();
+    assert.equal(q1Job.priority, 1);
+
+    const q2Job = await client.jobs().byQueue("q2").first();
+    assert.equal(q2Job.priority, 100);
+  });
+
+  it("countJobs", async () => {
+    assert.equal(await client.countJobs(), 0);
+
+    await enqueueBulk(client, [
+      { type: "count_a", queue: "q1", payload: {} },
+      { type: "count_b", queue: "q1", payload: {} },
+      { type: "count_c", queue: "q2", payload: {} },
+    ]);
+
+    assert.equal(await client.countJobs(), 3);
+    assert.equal(await client.countJobs({ queue: "q1" }), 2);
+    assert.equal(await client.countJobs({ queue: "q2" }), 1);
+    assert.equal(await client.countJobs({ type: "count_a" }), 1);
+    assert.equal(await client.countJobs({ queue: "q1", type: "count_b" }), 1);
+    assert.equal(await client.countJobs({ queue: "nonexistent" }), 0);
+  });
 });
