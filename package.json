@@ -1,6 +1,6 @@
 {
   "name": "@zizq-labs/zizq",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Node.js client for the Zizq job queue server",
   "homepage": "https://zizq.io",
   "repository": {
@@ -10,7 +10,13 @@
   "bugs": {
     "url": "https://github.com/zizq-labs/zizq-node/issues"
   },
-  "keywords": ["zizq", "job-queue", "background-jobs", "worker", "queue"],
+  "keywords": [
+    "zizq",
+    "job-queue",
+    "background-jobs",
+    "worker",
+    "queue"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

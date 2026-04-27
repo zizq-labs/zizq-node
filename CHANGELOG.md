@@ -1,7 +1,9 @@
 # Changelog
 
-## 0.1.2
+## 0.2.0
 
+- Add `Client.countJobs()` using new Zizq server endpoint
+- Optimise `Client.jobs().count()`
 
 ## 0.1.1
 
