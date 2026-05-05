@@ -36,363 +36,79 @@
 
 import { Pool, type Dispatcher } from "undici";
 import type { Readable } from "node:stream";
+
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
-import { Job, JobPage, ErrorRecord, ErrorPage, type JobData, type ErrorRecordData } from "./resources.ts";
+
+import {
+  Job,
+  JobPage,
+  ErrorRecord,
+  ErrorPage,
+  CronGroup,
+  CronEntry,
+  type JobData,
+  type ErrorRecordData,
+  type CronGroupData,
+  type CronEntryData,
+} from "./resources.ts";
+
 import { JobQuery, type JobQueryOptions } from "./query.ts";
 
-/** Lifecycle status of a job. */
-export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
+// Re-export all shared types so consumers can import from client.ts.
+export type {
+  JobStatus,
+  SortDirection,
+  UniqueScope,
+  BackoffConfig,
+  RetentionConfig,
+  EnqueueOptions,
+  FailureOptions,
+  UpdateJobOptions,
+  Format,
+  TakeOptions,
+  ListJobsOptions,
+  ListErrorsOptions,
+  UpdateAllJobsOptions,
+  JobFilter,
+  DeleteAllJobsOptions,
+  CronEntryInput,
+  ReplaceCronGroupOptions,
+} from "./types.ts";
 
-/** Sort direction for paginated listings. */
-export type SortDirection = "asc" | "desc";
-
-/** Uniqueness scope for deduplication. */
-export type UniqueScope = "queued" | "active" | "exists";
+import type {
+  JobStatus,
+  SortDirection,
+  UniqueScope,
+  BackoffConfig,
+  RetentionConfig,
+  EnqueueOptions,
+  FailureOptions,
+  UpdateJobOptions,
+  Format,
+  TakeOptions,
+  ListJobsOptions,
+  ListErrorsOptions,
+  UpdateAllJobsOptions,
+  JobFilter,
+  DeleteAllJobsOptions,
+  CronEntryInput,
+  ReplaceCronGroupOptions,
+} from "./types.ts";
 
 // Re-export resource types so consumers can import from client.ts.
-export { Job, JobPage, ErrorRecord, ErrorPage, type JobData, type ErrorRecordData } from "./resources.ts";
+export {
+  Job,
+  JobPage,
+  ErrorRecord,
+  ErrorPage,
+  CronGroup,
+  CronEntry,
+  type JobData,
+  type ErrorRecordData,
+  type CronGroupData,
+  type CronEntryData,
+} from "./resources.ts";
 
-/**
- * Backoff configuration for retry delays.
- *
- * This is used in the following formula:
- *
- * ```
- * t = baseMs + (attempts ** exponent) + (attempts * random() * jitterMs)
- * ```
- *
- * The random jitter is designed to ensure clusters of failed jobs do not all
- * retry at the same time but are instead randomly spread out.
- */
-export interface BackoffConfig {
-  /** Base delay in milliseconds, applied to all retries. */
-  baseMs: number;
-
-  /** Backoff curve steepness (attempts ** exponent). */
-  exponent: number;
-
-  /** Maximum random jitter in milliseconds per attempt multiplier. */
-  jitterMs: number;
-}
-
-/**
- * Retention configuration controlling how long jobs in terminal statuses are kept.
- *
- * The terminal statuses are "completed" and "dead".
- */
-export interface RetentionConfig {
-  /** How long completed jobs remain visible (ms). `null` clears to server default. */
-  completedMs?: number | null;
-
-  /** How long dead jobs remain visible (ms). `null` clears to server default. */
-  deadMs?: number | null;
-}
-
-/**
- * Options for enqueueing a single job.
- *
- * @example
- * ```ts
- * await client.enqueue({
- *   type: "generate_report",
- *   queue: "reports",
- *   payload: { reportId: 42 },
- *   priority: 100,            // optional, lower = higher priority
- *   readyAt: Date.now() + 60000, // optional, delay by 1 minute
- * });
- * ```
- */
-export interface EnqueueOptions {
-  /** Job type identifier. */
-  type: string;
-
-  /**
-   * Target queue name.
-   *
-   * Must be valid UTF-8 and must not contain any of the following reserved
-   * characters: ",", "?", "*", "[", "]", "{", "}", "!".
-   */
-  queue: string;
-
-  /**
-   * Arbitrary payload delivered to the worker.
-   */
-  payload: unknown;
-
-  /**
-   * Optional priority (lower = higher priority).
-   *
-   * Valid range is 0 to 65536. Default: 32768.
-   */
-  priority?: number;
-
-  /**
-   * Optional timestamp (ms since epoch) when the job becomes eligible.
-   *
-   * When set to a future timestamp the job is created in the "scheduled"
-   * status. Otherwise the job is created in the "ready" status.
-   */
-  readyAt?: number;
-
-  /**
-   * Optional per-job retry limit.
-   *
-   * When not set the server default value applies.
-   */
-  retryLimit?: number;
-
-  /** Optional per-job backoff configuration. */
-  backoff?: BackoffConfig;
-
-  /** Optional per-job retention configuration. */
-  retention?: RetentionConfig;
-
-  /**
-   * Optional unique key for enqueue-time deduplication.
-   *
-   * Requires a pro license on the server.
-   *
-   * The key is global across all queues and job types. Prefix with the job
-   * type to make it unique per job type.
-   */
-  uniqueKey?: string;
-
-  /**
-   * Uniqueness scope. Only valid when `uniqueKey` is set.
-   *
-   * When set to "queued" other jobs with the same key will not be enqueued as
-   * long as this job is in the "scheduled" or "ready" statuses.
-   *
-   * When set to "active" other jobs with the same key will not be enqueued
-   * while this job is in the "scheduled", "ready" or "in_flight" statuses.
-   *
-   * When set to "exists" other jobs with the same key will not be enqueued
-   * for as long as this job remains on the server (i.e. until it is eventually
-   * reaped, based on the retention policy).
-   */
-  uniqueWhile?: UniqueScope;
-}
-
-/** Options for reporting a job failure. */
-export interface FailureOptions {
-  /** Error message describing what went wrong. */
-  message: string;
-
-  /** Optional error class name, e.g. "TimeoutError". */
-  errorType?: string;
-
-  /** Optional stack trace from the worker. */
-  backtrace?: string;
-
-  /** Optional forced retry time (ms since epoch), bypassing backoff. */
-  retryAt?: number;
-
-  /**
-   * Kill the job immediately regardless of retry limit.
-   *
-   * Note: passing false does nothing.
-   */
-  kill?: boolean;
-}
-
-/**
- * Options for the streaming take endpoint.
- *
- * Returns an async generator which never terminates as long as the connection
- * to the server remains open. Clients should use `break` to explicitly
- * disconnect from the endpoint and stop receiving jobs.
- *
- * When no jobs are available, the generator waits until new jobs are enqueued.
- *
- * @example
- * ```ts
- * // Take up to 10 jobs at a time from specific queues
- * for await (const job of client.take({ prefetch: 10, queues: ["emails", "webhooks"] })) {
- *   // process job...
- * }
- * ```
- */
-export interface TakeOptions {
-  /**
-   * Maximum number of "in_flight", unacknowledged jobs the server will send.
-   *
-   * The default is 1, meaning the client must acknowledge or fail the job
-   * before the server sends the next, and so on.
-   */
-  prefetch?: number;
-
-  /** Only take jobs from these queues. Empty means all queues. */
-  queues?: string[];
-
-  /** AbortSignal to cancel the streaming connection. */
-  signal?: AbortSignal;
-}
-
-/**
- * Options for listing jobs with cursor-based pagination.
- *
- * @example
- * ```ts
- * const page = await client.listJobs({
- *   queue: "emails",
- *   status: ["ready", "in_flight"],
- *   limit: 20,
- * });
- * ```
- */
-export interface ListJobsOptions {
-  /** Cursor: start after this job ID (exclusive). */
-  from?: string;
-
-  /** Sort order. Default: "asc" (oldest first). */
-  order?: SortDirection;
-
-  /** Maximum number of jobs per page (1–2000, default 50). */
-  limit?: number;
-
-  /** Filter by status. Accepts a single value or an array. */
-  status?: JobStatus | JobStatus[];
-
-  /** Filter by queue name. Accepts a single value or an array. */
-  queue?: string | string[];
-
-  /** Filter by job type. Accepts a single value or an array. */
-  type?: string | string[];
-
-  /** Filter by job ID. Accepts a single value or an array. */
-  id?: string | string[];
-
-  /** jq expression to filter jobs by payload. */
-  filter?: string;
-}
-
-/**
- * Options for listing error records for a job.
- *
- * @example
- * ```ts
- * const page = await client.listErrors("job-id", { order: "desc", limit: 10 });
- * ```
- */
-export interface ListErrorsOptions {
-  /** Cursor: start after this attempt number (exclusive). */
-  from?: number;
-
-  /** Sort order. Default: "asc" (oldest first). */
-  order?: SortDirection;
-
-  /** Maximum number of error records per page (1–2000, default 50). */
-  limit?: number;
-}
-
-/**
- * Mutable fields for updating a job.
- *
- * Field semantics:
- * - **omitted or `undefined`** — leave unchanged
- * - **`null`** — clear the field (only valid for nullable fields)
- * - **a value** — update to that value
- *
- * Nullable fields: `readyAt`, `retryLimit`, `backoff`, `retention`.
- * Non-nullable fields: `queue`, `priority`.
- *
- * @example
- * ```ts
- * // Change priority and clear retry limit (use server default)
- * await client.updateJob("job-id", {
- *   priority: 100,
- *   retryLimit: null,
- * });
- * ```
- */
-export interface UpdateJobOptions {
-  /** Move the job to a different queue. */
-  queue?: string;
-
-  /** Change the job's priority. */
-  priority?: number;
-
-  /** Change when the job becomes ready (ms since epoch). `null` clears to immediately ready. */
-  readyAt?: number | null;
-
-  /** Override the retry limit. `null` clears to server default. */
-  retryLimit?: number | null;
-
-  /** Override the backoff config. `null` clears to server default. */
-  backoff?: BackoffConfig | null;
-
-  /** Override the retention config. `null` clears to server default. */
-  retention?: RetentionConfig | null;
-}
-
-/**
- * Options for bulk-updating jobs.
- *
- * Has two parts:
- * - `where` — filter selecting which jobs to update (same as `deleteAllJobs`)
- * - `apply` — fields to update on the matching jobs (same as `updateJob`)
- *
- * An empty array filter (e.g. `where.id: []`) short-circuits to 0 jobs updated.
- *
- * @example
- * ```ts
- * // Lower the priority of all dead jobs in the emails queue
- * const count = await client.updateAllJobs({
- *   where: { queue: "emails", status: "dead" },
- *   apply: { priority: 1000 },
- * });
- * ```
- */
-export interface UpdateAllJobsOptions {
-  /** Filter selecting which jobs to update. */
-  where?: JobFilter;
-
-  /** Fields to update on the matching jobs. */
-  apply: UpdateJobOptions;
-}
-
-/**
- * Filter for selecting jobs in bulk operations.
- *
- * Used by `deleteAllJobs` and `updateAllJobs` to scope which jobs are
- * affected. An empty filter selects all jobs.
- *
- * Multi-value fields accept either a single value or an array.
- */
-export interface JobFilter {
-  /** Filter by job ID. Accepts a single value or an array. */
-  id?: string | string[];
-
-  /** Filter by status. Accepts a single value or an array. */
-  status?: JobStatus | JobStatus[];
-
-  /** Filter by queue name. Accepts a single value or an array. */
-  queue?: string | string[];
-
-  /** Filter by job type. Accepts a single value or an array. */
-  type?: string | string[];
-
-  /** jq expression to filter jobs by payload. */
-  filter?: string;
-}
-
-/**
- * Options for bulk-deleting jobs.
- *
- * An empty `where` filter deletes all jobs.
- *
- * @example
- * ```ts
- * // Delete all dead jobs in the emails queue
- * const count = await client.deleteAllJobs({
- *   where: { queue: "emails", status: "dead" },
- * });
- * ```
- */
-export interface DeleteAllJobsOptions {
-  /** Filter selecting which jobs to delete. */
-  where?: JobFilter;
-}
 
 
 // --- API response shapes (used internally for type-safe casting) ---
@@ -431,6 +147,11 @@ interface CountJobsResponse {
 /** Response shape for `PATCH /jobs`. */
 interface PatchJobsResponse {
   patched: number;
+}
+
+/** Response shape for `GET /crons`. */
+interface ListCronGroupsResponse {
+  crons: string[];
 }
 
 /** Response shape for `GET /jobs/{id}/errors` */
@@ -472,7 +193,6 @@ export interface TlsOptions {
 }
 
 /** Serialization format for client-server communication. */
-export type Format = "json" | "msgpack";
 
 /** Options for constructing a {@link Client}. */
 export interface ClientOptions {
@@ -733,7 +453,7 @@ export class Client {
    *
    * @param id - The job ID to fetch.
    * @returns The full job data including payload.
-   * @throws {ZizqError} If the job is not found (404).
+   * @throws {NotFoundError} If the job is not found (404).
    */
   async getJob(id: string): Promise<Job> {
     return this.wrapJob(await this.handleResponse(await this.request("GET", `/jobs/${encodeURIComponent(id)}`)));
@@ -1029,6 +749,201 @@ export class Client {
   }
 
   /**
+   * List all cron group names.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @example
+   * ```ts
+   * const groups = await client.listCronGroups();
+   * // ["default", "billing"]
+   * ```
+   */
+  async listCronGroups(): Promise<string[]> {
+    const data = await this.handleResponse(
+      await this.request("GET", "/crons")
+    ) as ListCronGroupsResponse;
+    return data.crons;
+  }
+
+  /**
+   * Fetch a cron group and all its entries.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param name - The name of the cron group
+   * @returns The cron group record
+   * @throws {NotFoundError} If the cron group is not found.
+   */
+  async getCronGroup(name: string): Promise<CronGroup> {
+    const raw = await this.handleResponse(
+      await this.request("GET", `/crons/${encodeURIComponent(name)}`)
+    );
+    return new CronGroup(this, cronGroupFromApi(raw));
+  }
+
+  /**
+   * Create or replace an entire cron group.
+   *
+   * Entries absent from the request are removed. Entries with unchanged
+   * expressions preserve their scheduling state.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @example
+   * ```ts
+   * const group = await client.replaceCronGroup("default", {
+   *   entries: [
+   *     { name: "send-reminders", expression: "0 9 * * *",
+   *       job: { type: "send_reminders", queue: "emails", payload: {} } },
+   *   ],
+   * });
+   * ```
+   */
+  async replaceCronGroup(name: string, options: ReplaceCronGroupOptions): Promise<CronGroup> {
+    const body = stripUndefined({
+      paused: options.paused,
+      entries: options.entries.map(cronEntryToApi),
+    });
+    const raw = await this.handleResponse(
+      await this.put(`/crons/${encodeURIComponent(name)}`, body)
+    );
+    return new CronGroup(this, cronGroupFromApi(raw));
+  }
+
+  /**
+   * Update group-level fields.
+   *
+   * Currently only used for pause/resume.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param name - The name of the cron group
+   * @param options - The new state of the cron group
+   * @returns The cron group record
+   * @throws {NotFoundError} If the cron group is not found.
+   */
+  async updateCronGroup(name: string, options: { paused: boolean }): Promise<CronGroup> {
+    const raw = await this.handleResponse(
+      await this.patch(`/crons/${encodeURIComponent(name)}`, { paused: options.paused })
+    );
+    return new CronGroup(this, cronGroupFromApi(raw));
+  }
+
+  /**
+   * Delete a cron group and all its entries.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param name - The name of the cron group
+   * @throws {NotFoundError} If the cron group is not found.
+   */
+  async deleteCronGroup(name: string): Promise<void> {
+    const res = await this.request("DELETE", `/crons/${encodeURIComponent(name)}`);
+    if (res.statusCode !== 204) {
+      await this.throwOnError(res);
+    }
+  }
+
+  /**
+   * Fetch a single cron entry within a group.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param group - The name of the cron group
+   * @param entry - The name of the entry within the group
+   * @returns The cron entry record
+   * @throws {NotFoundError} If the cron entry is not found.
+   */
+  async getCronEntry(group: string, entry: string): Promise<CronEntry> {
+    const raw = await this.handleResponse(
+      await this.request("GET", `/crons/${encodeURIComponent(group)}/entries/${encodeURIComponent(entry)}`)
+    );
+    return new CronEntry(this, group, cronEntryFromApi(raw));
+  }
+
+  /**
+   * Add a single entry to a cron group.
+   *
+   * Creates the group if needed. Throws a 409 conflict error if an entry
+   * with the same name already exists.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @example
+   * ```ts
+   * const entry = await client.addCronEntry("default", {
+   *   name: "weekly-report",
+   *   expression: "0 9 * * MON",
+   *   job: { type: "generate_report", queue: "reports", payload: { format: "pdf" } },
+   * });
+   * ```
+   *
+   * @throws {ClientError} If the cron entry already exists (409)
+   */
+  async addCronEntry(group: string, entry: CronEntryInput): Promise<CronEntry> {
+    const raw = await this.handleResponse(
+      await this.post(`/crons/${encodeURIComponent(group)}/entries`, cronEntryToApi(entry))
+    );
+    return new CronEntry(this, group, cronEntryFromApi(raw));
+  }
+
+  /**
+   * Create or replace a single cron entry within a group.
+   *
+   * Creates the group if needed.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param group - The name of the cron group
+   * @param entry - The entry definition to create or replace
+   * @returns The cron entry record
+   */
+  async replaceCronEntry(group: string, entryName: string, entry: Omit<CronEntryInput, "name">): Promise<CronEntry> {
+    const body = cronEntryToApi({ ...entry, name: entryName });
+    const raw = await this.handleResponse(
+      await this.put(`/crons/${encodeURIComponent(group)}/entries/${encodeURIComponent(entryName)}`, body)
+    );
+    return new CronEntry(this, group, cronEntryFromApi(raw));
+  }
+
+  /**
+   * Update cron entry-level fields.
+   *
+   * Currently only used for pause/resume.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param group - The name of the cron group
+   * @param entry - The name of the entry within the group
+   * @param options - The new state of the cron group
+   * @returns The cron entry record
+   * @throws {NotFoundError} If the cron entry is not found.
+   */
+  async updateCronEntry(group: string, entry: string, options: { paused: boolean }): Promise<CronEntry> {
+    const raw = await this.handleResponse(
+      await this.patch(`/crons/${encodeURIComponent(group)}/entries/${encodeURIComponent(entry)}`, { paused: options.paused })
+    );
+    return new CronEntry(this, group, cronEntryFromApi(raw));
+  }
+
+  /**
+   * Delete a single cron entry within a group.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @param group - The name of the cron group
+   * @param entry - The name of the entry within the group
+   * @throws {NotFoundError} If the cron entry is not found.
+   */
+  async deleteCronEntry(group: string, entry: string): Promise<void> {
+    const res = await this.request("DELETE", `/crons/${encodeURIComponent(group)}/entries/${encodeURIComponent(entry)}`);
+    if (res.statusCode !== 204) {
+      await this.throwOnError(res);
+    }
+  }
+
+  /**
    * Connect to the streaming take endpoint and return an async generator
    * of jobs.
    *
@@ -1201,8 +1116,12 @@ export class Client {
     return this.requestWithBody("PATCH", path, body);
   }
 
+  private async put(path: string, body: unknown): Promise<Dispatcher.ResponseData> {
+    return this.requestWithBody("PUT", path, body);
+  }
+
   private async requestWithBody(
-    method: "POST" | "PATCH",
+    method: "POST" | "PATCH" | "PUT",
     path: string,
     body: unknown
   ): Promise<Dispatcher.ResponseData> {
@@ -1464,6 +1383,72 @@ function buildResponseError(status: number, body: unknown): ResponseError {
   if (status >= 400 && status < 500) return new ClientError(message, status, body);
   if (status >= 500) return new ServerError(message, status, body);
   return new ResponseError(message, status, body);
+}
+
+/** Convert an API-format cron entry to camelCase. */
+function cronEntryFromApi(raw: unknown): CronEntryData {
+  const r = raw as Record<string, unknown>;
+  const job = r.job as Record<string, unknown>;
+  return {
+    name: r.name as string,
+    expression: r.expression as string,
+    timezone: r.timezone as string | undefined,
+    paused: r.paused as boolean,
+    pausedAt: r.paused_at as number | undefined,
+    resumedAt: r.resumed_at as number | undefined,
+    job: stripUndefined({
+      type: job.type,
+      queue: job.queue,
+      payload: job.payload,
+      priority: job.priority,
+      retryLimit: job.retry_limit,
+      backoff: job.backoff != null ? backoffFromApi(job.backoff) : undefined,
+      retention: job.retention != null ? retentionFromApi(job.retention) : undefined,
+      uniqueKey: job.unique_key,
+      uniqueWhile: job.unique_while,
+    }) as unknown as EnqueueOptions,
+    nextEnqueueAt: r.next_enqueue_at as number | undefined,
+    lastEnqueueAt: r.last_enqueue_at as number | undefined,
+  };
+}
+
+/** Convert an API-format cron group to camelCase. */
+function cronGroupFromApi(raw: unknown): CronGroupData {
+  const r = raw as Record<string, unknown>;
+  const entries = (r.entries as unknown[]) || [];
+  return {
+    name: r.name as string,
+    paused: r.paused as boolean,
+    pausedAt: r.paused_at as number | undefined,
+    resumedAt: r.resumed_at as number | undefined,
+    entries: entries.map(cronEntryFromApi),
+  };
+}
+
+/** Convert an EnqueueOptions (used as cron job template) to the server's snake_case API format. */
+function cronJobToApi(job: EnqueueOptions): Record<string, unknown> {
+  return stripUndefined({
+    type: job.type,
+    queue: job.queue,
+    payload: job.payload,
+    priority: job.priority,
+    retry_limit: job.retryLimit,
+    backoff: job.backoff && backoffToApi(job.backoff),
+    retention: job.retention && retentionToApi(job.retention),
+    unique_key: job.uniqueKey,
+    unique_while: job.uniqueWhile,
+  });
+}
+
+/** Convert a CronEntryInput to the server's API format. */
+function cronEntryToApi(entry: CronEntryInput): Record<string, unknown> {
+  return stripUndefined({
+    name: entry.name,
+    expression: entry.expression,
+    timezone: entry.timezone,
+    paused: entry.paused,
+    job: cronJobToApi(entry.job),
+  });
 }
 
 /** Wrap a low-level error (from undici) as a ConnectionError. */
