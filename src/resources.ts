@@ -10,18 +10,18 @@
  * @module
  */
 
+import type { Client } from "./client.ts";
 import type {
-  Client,
   JobStatus,
   UniqueScope,
   BackoffConfig,
   RetentionConfig,
+  EnqueueOptions,
   FailureOptions,
   UpdateJobOptions,
-} from "./client.ts";
-import { ErrorQuery, type ErrorQueryOptions } from "./query.ts";
+} from "./types.ts";
 
-// --- JobData ---
+import { ErrorQuery, type ErrorQueryOptions } from "./query.ts";
 
 /** Raw job data shape (camelCase, as returned by the API translation layer). */
 export interface JobData {
@@ -83,8 +83,6 @@ export interface JobData {
   /** True if this job was returned as a duplicate (enqueue responses only). */
   duplicate?: boolean;
 }
-
-// --- Job ---
 
 /**
  * A job returned by the Zizq server.
@@ -261,8 +259,6 @@ export class Job {
   }
 }
 
-// --- JobPage ---
-
 /**
  * A page of jobs returned by `Client.listJobs()`.
  *
@@ -352,20 +348,23 @@ export class JobPage {
   }
 }
 
-// --- ErrorRecord ---
-
 /** Raw error record data (camelCase). */
 export interface ErrorRecordData {
   /** Which attempt this error corresponds to (1-based). */
   attempt: number;
+
   /** Error message from the worker. */
   message: string;
+
   /** Error class, e.g. "TimeoutError". */
   errorType?: string;
+
   /** Stack trace / backtrace. */
   backtrace?: string;
+
   /** When the job was dequeued for this attempt (ms since Unix epoch). */
   dequeuedAt: number;
+
   /** When the job failed (ms since Unix epoch). */
   failedAt: number;
 }
@@ -376,14 +375,19 @@ export interface ErrorRecordData {
 export class ErrorRecord {
   /** Which attempt this error corresponds to (1-based). */
   readonly attempt: number;
+
   /** Error message from the worker. */
   readonly message: string;
+
   /** Error class, e.g. "TimeoutError". */
   readonly errorType?: string;
+
   /** Stack trace / backtrace. */
   readonly backtrace?: string;
+
   /** When the job was dequeued for this attempt (ms since Unix epoch). */
   readonly dequeuedAt: number;
+
   /** When the job failed (ms since Unix epoch). */
   readonly failedAt: number;
 
@@ -397,8 +401,6 @@ export class ErrorRecord {
     this.failedAt = data.failedAt;
   }
 }
-
-// --- ErrorPage ---
 
 /**
  * A page of error records returned by `Client.listErrors()`.
@@ -458,5 +460,196 @@ export class ErrorPage {
   async prevPage(): Promise<ErrorPage | null> {
     if (!this.prevUrl) return null;
     return this.client.listErrorsByPath(this.prevUrl);
+  }
+}
+
+/** Camel-case data shape for a cron entry. */
+export interface CronEntryData {
+  /** Entry name (unique within the group). */
+  name: string;
+
+  /** Cron expression. */
+  expression: string;
+
+  /** IANA timezone name, or undefined for server default. */
+  timezone?: string;
+
+  /** Whether this entry is paused. */
+  paused: boolean;
+
+  /** When this entry was last paused (ms since epoch). */
+  pausedAt?: number;
+
+  /** When this entry was last resumed (ms since epoch). */
+  resumedAt?: number;
+
+  /** Job template that is enqueued on each tick. */
+  job: EnqueueOptions;
+
+  /** Next scheduled enqueue time (ms since epoch). */
+  nextEnqueueAt?: number;
+
+  /** Last enqueue time (ms since epoch). */
+  lastEnqueueAt?: number;
+}
+
+/** Camel-case data shape for a cron group. */
+export interface CronGroupData {
+  /** Group name. */
+  name: string;
+
+  /** Whether the group is paused. */
+  paused: boolean;
+
+  /** When the group was last paused (ms since epoch). */
+  pausedAt?: number;
+
+  /** When the group was last resumed (ms since epoch). */
+  resumedAt?: number;
+
+  /** Entries in this group. */
+  entries: CronEntryData[];
+}
+
+/**
+ * A cron entry returned by the Zizq server.
+ *
+ * Provides readonly access to all entry fields plus action methods.
+ */
+export class CronEntry {
+  /** Entry name (unique within the group). */
+  readonly name: string;
+
+  /** Cron expression. */
+  readonly expression: string;
+
+  /** IANA timezone name, or undefined for server default. */
+  readonly timezone?: string;
+
+  /** Whether this entry is paused. */
+  readonly paused: boolean;
+
+  /** When this entry was last paused (ms since epoch). */
+  readonly pausedAt?: number;
+
+  /** When this entry was last resumed (ms since epoch). */
+  readonly resumedAt?: number;
+
+  /** Job template that is enqueued on each tick. */
+  readonly job: EnqueueOptions;
+
+  /** Next scheduled enqueue time (ms since epoch). */
+  readonly nextEnqueueAt?: number;
+
+  /** Last enqueue time (ms since epoch). */
+  readonly lastEnqueueAt?: number;
+
+  /** @internal */
+  private client: Client;
+  private group: string;
+
+  /** @internal */
+  constructor(client: Client, group: string, data: CronEntryData) {
+    this.client = client;
+    this.group = group;
+    this.name = data.name;
+    this.expression = data.expression;
+    this.timezone = data.timezone;
+    this.paused = data.paused;
+    this.pausedAt = data.pausedAt;
+    this.resumedAt = data.resumedAt;
+    this.job = data.job;
+    this.nextEnqueueAt = data.nextEnqueueAt;
+    this.lastEnqueueAt = data.lastEnqueueAt;
+  }
+
+  /**
+   * Pause this entry.
+   *
+   * When paused, the Zizq server sets `pausedAt` and stops enqueueing jobs for
+   * the entry.
+   */
+  async pause(): Promise<CronEntry> {
+    const data = await this.client.updateCronEntry(this.group, this.name, { paused: true });
+    return new CronEntry(this.client, this.group, data);
+  }
+
+  /**
+   * Resume this entry.
+   *
+   * When resumed, the Zizq server sets `resumedAt` and recommences enqueueing
+   * jobs for the entry.
+   */
+  async resume(): Promise<CronEntry> {
+    const data = await this.client.updateCronEntry(this.group, this.name, { paused: false });
+    return new CronEntry(this.client, this.group, data);
+  }
+
+  /** Delete this entry from the group. */
+  async delete(): Promise<void> {
+    return this.client.deleteCronEntry(this.group, this.name);
+  }
+}
+
+/**
+ * A cron group returned by the Zizq server.
+ *
+ * Provides readonly access to group fields and its entries, plus action
+ * methods for pausing, resuming, and deleting the group.
+ */
+export class CronGroup {
+  /** Group name. */
+  readonly name: string;
+
+  /** Whether the group is paused. */
+  readonly paused: boolean;
+
+  /** When the group was last paused (ms since epoch). */
+  readonly pausedAt?: number;
+
+  /** When the group was last resumed (ms since epoch). */
+  readonly resumedAt?: number;
+
+  /** Entries in this group. */
+  readonly entries: CronEntry[];
+
+  /** @internal */
+  private client: Client;
+
+  /** @internal */
+  constructor(client: Client, data: CronGroupData) {
+    this.client = client;
+    this.name = data.name;
+    this.paused = data.paused;
+    this.pausedAt = data.pausedAt;
+    this.resumedAt = data.resumedAt;
+    this.entries = data.entries.map(e => new CronEntry(client, data.name, e));
+  }
+
+  /**
+   * Pause this cron group.
+   *
+   * When paused the Zizq server sets `pausedAt` and stops enqueueing jobs for
+   * all entries in the group, even if those entries are not paused.
+   */
+  async pause(): Promise<CronGroup> {
+    const data = await this.client.updateCronGroup(this.name, { paused: true });
+    return new CronGroup(this.client, data);
+  }
+
+  /**
+   * Resume this cron group.
+   *
+   * When resumed the Zizq server sets `resumedAt` and recommences enqueueing
+   * jobs for all unpaused entries in the group. Paused entries remain paused.
+   */
+  async resume(): Promise<CronGroup> {
+    const data = await this.client.updateCronGroup(this.name, { paused: false });
+    return new CronGroup(this.client, data);
+  }
+
+  /** Delete this cron group and all its entries. */
+  async delete(): Promise<void> {
+    return this.client.deleteCronGroup(this.name);
   }
 }
