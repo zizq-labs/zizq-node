@@ -13,9 +13,11 @@
   "keywords": [
     "zizq",
     "job-queue",
+    "message-queue",
     "background-jobs",
     "worker",
-    "queue"
+    "queue",
+    "cron"
   ],
   "type": "module",
   "main": "dist/index.js",
