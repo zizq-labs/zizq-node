@@ -7,6 +7,8 @@ export {
   JobPage,
   ErrorRecord,
   ErrorPage,
+  CronGroup,
+  CronEntry,
   ZizqError,
   ConnectionError,
   ResponseError,
@@ -17,25 +19,35 @@ export {
 
 export type {
   ClientOptions,
-  JobData,
-  EnqueueOptions,
-  ListJobsOptions,
-  JobFilter,
-  DeleteAllJobsOptions,
-  UpdateJobOptions,
-  UpdateAllJobsOptions,
-  ListErrorsOptions,
-  ErrorRecordData,
-  FailureOptions,
-  TakeOptions,
+  TlsOptions,
+} from "./client.ts";
+
+export type {
+  JobStatus,
+  SortDirection,
+  UniqueScope,
+  Format,
   BackoffConfig,
   RetentionConfig,
-  JobStatus,
-  UniqueScope,
-  SortDirection,
-  TlsOptions,
-  Format,
-} from "./client.ts";
+  EnqueueOptions,
+  FailureOptions,
+  UpdateJobOptions,
+  TakeOptions,
+  ListJobsOptions,
+  ListErrorsOptions,
+  UpdateAllJobsOptions,
+  JobFilter,
+  DeleteAllJobsOptions,
+  CronEntryInput,
+  ReplaceCronGroupOptions,
+} from "./types.ts";
+
+export type {
+  JobData,
+  ErrorRecordData,
+  CronEntryData,
+  CronGroupData,
+} from "./resources.ts";
 
 export { Worker } from "./worker.ts";
 
@@ -54,6 +66,9 @@ export { Lazy, ErrorQuery, JobQuery } from "./query.ts";
 export type { ErrorQueryOptions, JobQueryOptions } from "./query.ts";
 
 export { enqueue, enqueueBulk } from "./enqueue.ts";
+
+export { CronHandle, CronEntryHandle } from "./cron.ts";
+export type { CronEntryDefinition, RegisterCronOptions } from "./cron.ts";
 
 export type { EnqueueInput } from "./enqueue.ts";
 

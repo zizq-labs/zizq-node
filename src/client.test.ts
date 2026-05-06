@@ -739,4 +739,184 @@ describe("Client", () => {
       assert.deepEqual(jobs[1].payload, { n: 2 });
     });
   });
+
+  describe("cron scheduling", () => {
+    const cronGroupResponse = {
+      name: "default",
+      paused: false,
+      entries: [{
+        name: "e1",
+        expression: "* * * * *",
+        paused: false,
+        job: { type: "test", queue: "q", payload: {} },
+        next_enqueue_at: 1700000060000,
+      }],
+    };
+
+    const cronEntryResponse = cronGroupResponse.entries[0];
+
+    it("listCronGroups returns group names", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons", method: "GET" })
+        .reply(200, { crons: ["default", "billing"] }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const groups = await ctx.client.listCronGroups();
+      assert.deepEqual(groups, ["default", "billing"]);
+    });
+
+    it("getCronGroup returns a CronGroup instance", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "GET" })
+        .reply(200, cronGroupResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const group = await ctx.client.getCronGroup("default");
+      assert.equal(group.name, "default");
+      assert.equal(group.paused, false);
+      assert.equal(group.entries.length, 1);
+      assert.equal(group.entries[0].name, "e1");
+      assert.equal(group.entries[0].expression, "* * * * *");
+      assert.equal(group.entries[0].job.type, "test");
+      assert.equal(group.entries[0].nextEnqueueAt, 1700000060000);
+    });
+
+    it("replaceCronGroup sends PUT and returns CronGroup", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "PUT" })
+        .reply(200, cronGroupResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const group = await ctx.client.replaceCronGroup("default", {
+        entries: [{
+          name: "e1",
+          expression: "* * * * *",
+          job: { type: "test", queue: "q", payload: {} },
+        }],
+      });
+      assert.equal(group.name, "default");
+      assert.equal(group.entries.length, 1);
+    });
+
+    it("updateCronGroup pauses a group", async () => {
+      const paused = { ...cronGroupResponse, paused: true, paused_at: 1700000000000 };
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "PATCH" })
+        .reply(200, paused, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const group = await ctx.client.updateCronGroup("default", { paused: true });
+      assert.equal(group.paused, true);
+      assert.equal(group.pausedAt, 1700000000000);
+    });
+
+    it("deleteCronGroup sends DELETE", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "DELETE" })
+        .reply(204);
+
+      await ctx.client.deleteCronGroup("default");
+    });
+
+    it("getCronEntry returns a CronEntry instance", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries/e1", method: "GET" })
+        .reply(200, cronEntryResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const entry = await ctx.client.getCronEntry("default", "e1");
+      assert.equal(entry.name, "e1");
+      assert.equal(entry.expression, "* * * * *");
+      assert.equal(entry.job.type, "test");
+    });
+
+    it("addCronEntry sends POST and returns CronEntry", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries", method: "POST" })
+        .reply(201, cronEntryResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const entry = await ctx.client.addCronEntry("default", {
+        name: "e1",
+        expression: "* * * * *",
+        job: { type: "test", queue: "q", payload: {} },
+      });
+      assert.equal(entry.name, "e1");
+    });
+
+    it("replaceCronEntry sends PUT and returns CronEntry", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries/e1", method: "PUT" })
+        .reply(200, cronEntryResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const entry = await ctx.client.replaceCronEntry("default", "e1", {
+        expression: "* * * * *",
+        job: { type: "test", queue: "q", payload: {} },
+      });
+      assert.equal(entry.name, "e1");
+    });
+
+    it("updateCronEntry pauses an entry", async () => {
+      const paused = { ...cronEntryResponse, paused: true, paused_at: 1700000000000 };
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries/e1", method: "PATCH" })
+        .reply(200, paused, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const entry = await ctx.client.updateCronEntry("default", "e1", { paused: true });
+      assert.equal(entry.paused, true);
+      assert.equal(entry.pausedAt, 1700000000000);
+    });
+
+    it("deleteCronEntry sends DELETE", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries/e1", method: "DELETE" })
+        .reply(204);
+
+      await ctx.client.deleteCronEntry("default", "e1");
+    });
+
+    it("CronGroup.pause() delegates to updateCronGroup", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "GET" })
+        .reply(200, cronGroupResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const paused = { ...cronGroupResponse, paused: true };
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "PATCH" })
+        .reply(200, paused, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const group = await ctx.client.getCronGroup("default");
+      const updated = await group.pause();
+      assert.equal(updated.paused, true);
+    });
+
+    it("CronEntry.delete() delegates to deleteCronEntry", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default", method: "GET" })
+        .reply(200, cronGroupResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries/e1", method: "DELETE" })
+        .reply(204);
+
+      const group = await ctx.client.getCronGroup("default");
+      await group.entries[0].delete();
+    });
+  });
 });

@@ -1,7 +1,8 @@
 # Changelog
 
-## 0.2.1
+## 0.3.0
 
+- Added support for cron scheduling
 
 ## 0.2.0
 
