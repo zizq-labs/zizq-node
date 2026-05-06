@@ -169,10 +169,15 @@ function computeUniqueKey(
   return uniqueKey;
 }
 
-// Resolve an EnqueueInput into a low-level EnqueueOptions by taking the
-// result of zizqOptions (if provided), optionally transformed, and then
-// merging over the top any overrides present in the input.
-function resolveInput(input: EnqueueInput): EnqueueOptions {
+/**
+ * Resolve an EnqueueInput into a low-level EnqueueOptions.
+ *
+ * Takes the result of zizqOptions (if provided), optionally transformed,
+ * and then merges over the top any overrides present in the input.
+ *
+ * @internal Exported for use by the cron scheduling module.
+ */
+export function resolveInput(input: EnqueueInput): EnqueueOptions {
   let jobType: string;
   let defaults: ZizqOptions | undefined;
 

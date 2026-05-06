@@ -53,6 +53,7 @@ import {
 } from "./resources.ts";
 
 import { JobQuery, type JobQueryOptions } from "./query.ts";
+import { CronHandle } from "./cron.ts";
 
 // Re-export all shared types so consumers can import from client.ts.
 export type {
@@ -941,6 +942,23 @@ export class Client {
     if (res.statusCode !== 204) {
       await this.throwOnError(res);
     }
+  }
+
+  /**
+   * Get a handle for a cron group (schedule).
+   *
+   * No API call is made until you invoke a method on the handle.
+   *
+   * @example
+   * ```ts
+   * const cron = client.cron("default");
+   * await cron.register({ entries: [...] });
+   * await cron.pause();
+   * await cron.entry("sync").pause();
+   * ```
+   */
+  cron(name: string): CronHandle {
+    return new CronHandle(this, name);
   }
 
   /**
