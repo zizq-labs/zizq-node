@@ -17,8 +17,27 @@ This is the official Zizq client library for Node.js, written in TypeScript.
 * Scheduled jobs
 * Configurable backoff policies
 * Configurable job retention policies
+* Recurring jobs (cron)
 * Job introspection and management APIs, with support for `jq` query filters
 * Unique jobs
+
+## Installation
+
+> [!NOTE]
+> If you have not yet installed the Zizq server, follow the
+> [Getting Started](https://zizq.io/docs/getting-started) guide first.
+
+Install it with your package manager of choice:
+
+``` shell
+npm install @zizq-labs/zizq
+```
+
+Or:
+
+```shell
+yarn add @zizq-labs/zizq
+```
 
 ## Example
 

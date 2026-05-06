@@ -67,6 +67,9 @@ export type { ErrorQueryOptions, JobQueryOptions } from "./query.ts";
 
 export { enqueue, enqueueBulk } from "./enqueue.ts";
 
+export { CronHandle, CronEntryHandle } from "./cron.ts";
+export type { CronEntryDefinition, RegisterCronOptions } from "./cron.ts";
+
 export type { EnqueueInput } from "./enqueue.ts";
 
 export { uniqueKey } from "./unique-key.ts";

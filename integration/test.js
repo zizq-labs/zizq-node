@@ -18,7 +18,7 @@ import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
 // Import from the installed package, NOT from source.
-import { Client, Worker, NotFoundError, enqueue, enqueueBulk } from "@zizq-labs/zizq";
+import { Client, Worker, NotFoundError, ClientError, enqueue, enqueueBulk } from "@zizq-labs/zizq";
 
 const noopLogger = {
   info() {},
@@ -287,5 +287,117 @@ describe("integration", { concurrency: 1 }, () => {
     assert.equal(await client.countJobs({ type: "count_a" }), 1);
     assert.equal(await client.countJobs({ queue: "q1", type: "count_b" }), 1);
     assert.equal(await client.countJobs({ queue: "nonexistent" }), 0);
+  });
+
+  // --- Cron scheduling (requires Pro license) ---
+
+  it("cron: define schedule and re-fetch", async () => {
+    try {
+      const cron = client.cron("integration-test");
+
+      // Define a schedule with three entries.
+      const group = await cron.register({
+        entries: [
+          { name: "entry-a", expression: "* * * * *", type: "cron_a", queue: "cron-integration", payload: {} },
+          { name: "entry-b", expression: "*/5 * * * *", type: "cron_b", queue: "cron-integration", payload: {} },
+          { name: "entry-c", expression: "0 0 * * *", type: "cron_c", queue: "cron-integration", payload: {} },
+        ],
+      });
+
+      assert.equal(group.entries.length, 3);
+
+      // Re-fetch and verify.
+      const fetched = await cron.get();
+      assert.equal(fetched.entries.length, 3);
+
+      const names = fetched.entries.map(e => e.name).sort();
+      assert.deepEqual(names, ["entry-a", "entry-b", "entry-c"]);
+
+      assert.equal(fetched.entries.find(e => e.name === "entry-a").expression, "* * * * *");
+      assert.equal(fetched.entries.find(e => e.name === "entry-b").expression, "*/5 * * * *");
+      assert.equal(fetched.entries.find(e => e.name === "entry-c").expression, "0 0 * * *");
+
+      // Cleanup.
+      await cron.delete();
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) {
+        return; // skip — no Pro license
+      }
+      throw err;
+    }
+  });
+
+  it("cron: redefine removes absent entries", async () => {
+    try {
+      const cron = client.cron("integration-test");
+
+      // Define with three entries.
+      await cron.register({
+        entries: [
+          { name: "keep-a", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+          { name: "keep-b", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+          { name: "remove-c", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+        ],
+      });
+
+      // Redefine with only two entries.
+      await cron.register({
+        entries: [
+          { name: "keep-a", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+          { name: "keep-b", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+        ],
+      });
+
+      // Re-fetch and verify remove-c is gone.
+      const fetched = await cron.get();
+      assert.equal(fetched.entries.length, 2);
+
+      const names = fetched.entries.map(e => e.name).sort();
+      assert.deepEqual(names, ["keep-a", "keep-b"]);
+
+      // Cleanup.
+      await cron.delete();
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) {
+        return;
+      }
+      throw err;
+    }
+  });
+
+  it("cron: pause and resume an entry", async () => {
+    try {
+      const cron = client.cron("integration-test");
+
+      await cron.register({
+        entries: [
+          { name: "pausable", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+        ],
+      });
+
+      // Verify not paused initially.
+      let entry = await cron.entry("pausable").get();
+      assert.equal(entry.paused, false);
+
+      // Pause.
+      await cron.entry("pausable").pause();
+      entry = await cron.entry("pausable").get();
+      assert.equal(entry.paused, true);
+      assert.ok(entry.pausedAt);
+
+      // Resume.
+      await cron.entry("pausable").resume();
+      entry = await cron.entry("pausable").get();
+      assert.equal(entry.paused, false);
+      assert.ok(entry.resumedAt);
+
+      // Cleanup.
+      await cron.delete();
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) {
+        return;
+      }
+      throw err;
+    }
   });
 });
