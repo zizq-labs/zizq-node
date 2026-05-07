@@ -1,156 +1,49 @@
 // Copyright (c) 2026 Chris Corbyn <chris@zizq.io>
 // Licensed under the MIT License. See LICENSE file for details.
 
-// High-level enqueue helpers that support both string types and function references.
+// High-level enqueue helpers.
+//
+// The resolveInput function and EnqueueInput type are the core of this
+// module. The free enqueue/enqueueBulk functions are deprecated wrappers
+// around client.enqueue()/client.enqueueBulk().
 
-import {
-  Client,
-  type BackoffConfig,
-  type EnqueueOptions,
-  Job,
-  type RetentionConfig,
-  type UniqueScope,
-} from "./client.ts";
-
+import type { EnqueueOptions, EnqueueInput } from "./types.ts";
 import type { JobFunction, ZizqOptions } from "./handler.ts";
+import type { Client } from "./client.ts";
+import type { Job } from "./resources.ts";
 
-/**
- * Input for enqueueing a job.
- *
- * The `type` field accepts either a string job type name or a function
- * reference with optional attached `zizqOptions`. When a function is provided,
- * its `zizqOptions` supplies defaults for `queue`, `priority`, etc. These
- * defaults can be overridden by inputs specified at enqueue-time.
- *
- * When `type` is a string, `queue` is required in the inputs.
- *
- * @example Function reference
- * ```ts
- * await enqueue(client, { type: sendEmail, payload: { to: "a@b.com" } });
- * ```
- *
- * @example String type with explicit config
- * ```ts
- * await enqueue(client, {
- *   type: "send_email",
- *   queue: "emails",
- *   payload: { to: "a@b.com" },
- *   priority: 100,
- * });
- * ```
- */
-export interface EnqueueInput {
-  /** Job type — a function reference or a string type name. */
-  type: JobFunction | string;
-
-  /** Arbitrary payload delivered to the worker. */
-  payload: unknown;
-
-  /**
-   * Target queue name.
-   *
-   * Required when `type` is a string and no `zizqOptions.queue` default
-   * is available.
-   */
-  queue?: string;
-
-  /**
-   * Priority (lower = higher priority).
-   *
-   * Valid range is 0 to 65536. Default: 32768.
-   */
-  priority?: number;
-
-  /**
-   * Timestamp (ms since epoch) when the job becomes eligible.
-   *
-   * When set to a future timestamp the job is created in the "scheduled"
-   * status. Otherwise the job is created in the "ready" status.
-   */
-  readyAt?: number;
-
-  /**
-   * Per-job retry limit.
-   *
-   * When not set the server default value applies.
-   */
-  retryLimit?: number;
-
-  /** Per-job backoff configuration. */
-  backoff?: BackoffConfig;
-
-  /** Per-job retention configuration. */
-  retention?: RetentionConfig;
-
-  /**
-   * Unique key for enqueue-time deduplication.
-   *
-   * Requires a pro license on the server.
-   *
-   * The key is global across all queues and job types. Prefix with the job
-   * type to make it unique per job type.
-   */
-  uniqueKey?: string;
-
-  /** Uniqueness scope. Only valid when `uniqueKey` is set. */
-  uniqueWhile?: UniqueScope;
-}
+export type { EnqueueInput } from "./types.ts";
 
 /**
  * Enqueue a single job.
  *
+ * @deprecated Use `client.enqueue()` instead.
+ *
  * @param client - The Zizq client to use for the HTTP request.
  * @param input - Job type, payload, and optional configuration.
  * @returns The created job, including its server-assigned `id` and `status`.
- *
- * @example Function reference
- * ```ts
- * async function sendEmail(payload) { ... }
- * sendEmail.zizqOptions = { queue: "emails", priority: 100 };
- *
- * const job = await enqueue(client, {
- *   type: sendEmail,
- *   payload: { to: "user@example.com" },
- * });
- * ```
- *
- * @example String type
- * ```ts
- * const job = await enqueue(client, {
- *   type: "send_email",
- *   queue: "emails",
- *   payload: { to: "user@example.com" },
- * });
- * ```
  */
 export async function enqueue(
   client: Client,
   input: EnqueueInput,
 ): Promise<Job> {
-  return client.enqueue(resolveInput(input));
+  return client.enqueue(input);
 }
 
 /**
  * Enqueue multiple jobs in a single request.
  *
+ * @deprecated Use `client.enqueueBulk()` instead.
+ *
  * @param client - The Zizq client to use for the HTTP request.
  * @param inputs - Array of job inputs.
  * @returns An array of created jobs in the same order as the input.
- *
- * @example
- * ```ts
- * const jobs = await enqueueBulk(client, [
- *   { type: sendEmail, payload: { to: "a@b.com" } },
- *   { type: sendEmail, payload: { to: "c@d.com" }, priority: 1 },
- *   { type: "manual_job", queue: "ops", payload: {} },
- * ]);
- * ```
  */
 export async function enqueueBulk(
   client: Client,
   inputs: EnqueueInput[],
 ): Promise<Job[]> {
-  return client.enqueueBulk(inputs.map(resolveInput));
+  return client.enqueueBulk(inputs);
 }
 
 // --- Internal ---

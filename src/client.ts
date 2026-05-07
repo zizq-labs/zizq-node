@@ -54,6 +54,7 @@ import {
 
 import { JobQuery, type JobQueryOptions } from "./query.ts";
 import { CronHandle } from "./cron.ts";
+import { resolveInput } from "./enqueue.ts";
 
 // Re-export all shared types so consumers can import from client.ts.
 export type {
@@ -63,6 +64,7 @@ export type {
   BackoffConfig,
   RetentionConfig,
   EnqueueOptions,
+  EnqueueInput,
   FailureOptions,
   UpdateJobOptions,
   Format,
@@ -83,6 +85,7 @@ import type {
   BackoffConfig,
   RetentionConfig,
   EnqueueOptions,
+  EnqueueInput,
   FailureOptions,
   UpdateJobOptions,
   Format,
@@ -368,10 +371,14 @@ export class Client {
   /**
    * Enqueue a single job.
    *
+   * The `type` field accepts either a string job type name or a function
+   * reference with attached `zizqOptions`. When a function is provided,
+   * its `zizqOptions` supplies defaults for `queue`, `priority`, etc.
+   *
    * @returns The created job, including its server-assigned `id` and `status`.
    * @throws {ZizqError} If the server rejects the request (e.g. invalid queue name).
    *
-   * @example
+   * @example String type
    * ```ts
    * const job = await client.enqueue({
    *   type: "send_email",
@@ -379,26 +386,61 @@ export class Client {
    *   payload: { to: "user@example.com" },
    * });
    * ```
+   *
+   * @example Function reference
+   * ```ts
+   * const job = await client.enqueue({
+   *   type: sendEmail,
+   *   payload: { to: "user@example.com" },
+   * });
+   * ```
    */
-  async enqueue(options: EnqueueOptions): Promise<Job> {
-    const api = enqueueToApi(options);
-    return this.wrapJob(await this.handleResponse(await this.post("/jobs", api)));
+  async enqueue(input: EnqueueInput): Promise<Job> {
+    return this.enqueueRaw(resolveInput(input));
   }
 
   /**
    * Enqueue multiple jobs in a single request.
+   *
+   * Accepts the same input format as {@link enqueue}, including function
+   * references for the `type` field.
    *
    * @returns An array of created jobs in the same order as the input.
    *
    * @example
    * ```ts
    * const jobs = await client.enqueueBulk([
-   *   { type: "send_email", queue: "emails", payload: { to: "a@b.com" } },
-   *   { type: "send_email", queue: "emails", payload: { to: "c@d.com" } },
+   *   { type: sendEmail, payload: { to: "a@b.com" } },
+   *   { type: "manual_job", queue: "ops", payload: {} },
    * ]);
    * ```
    */
-  async enqueueBulk(jobs: EnqueueOptions[]): Promise<Job[]> {
+  async enqueueBulk(inputs: EnqueueInput[]): Promise<Job[]> {
+    return this.enqueueBulkRaw(inputs.map(resolveInput));
+  }
+
+  /**
+   * Enqueue a single job using raw, fully-resolved options.
+   *
+   * Prefer {@link enqueue} for most use cases. This method is useful when
+   * you have already resolved function references or need direct control
+   * over the options object.
+   *
+   * @returns The created job, including its server-assigned `id` and `status`.
+   */
+  async enqueueRaw(options: EnqueueOptions): Promise<Job> {
+    const api = enqueueToApi(options);
+    return this.wrapJob(await this.handleResponse(await this.post("/jobs", api)));
+  }
+
+  /**
+   * Enqueue multiple jobs using raw, fully-resolved options.
+   *
+   * Prefer {@link enqueueBulk} for most use cases.
+   *
+   * @returns An array of created jobs in the same order as the input.
+   */
+  async enqueueBulkRaw(jobs: EnqueueOptions[]): Promise<Job[]> {
     const api = { jobs: jobs.map(enqueueToApi) };
     const data = await this.handleResponse(await this.post("/jobs/bulk", api)) as { jobs: unknown[] };
     return data.jobs.map((j) => this.wrapJob(j));

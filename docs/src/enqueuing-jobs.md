@@ -1,31 +1,29 @@
 # Enqueuing Jobs
 
-The Zizq Node client exposes two top-level enqueue functions:
+The Zizq Node client exposes two enqueue methods:
 
-- `enqueue(client, input)` — enqueue a single job.
-- `enqueueBulk(client, inputs)` — enqueue many jobs in a single HTTP request.
+- `client.enqueue(input)` — enqueue a single job.
+- `client.enqueueBulk(inputs)` — enqueue many jobs in a single HTTP request.
 
 > [!NOTE]
 > Both [Job Functions](./handlers.md#job-functions) and raw job inputs use the
-> same enqueue functions. The only difference is that Job Functions can be
+> same enqueue methods. The only difference is that Job Functions can be
 > passed directly as the `type`, and any `zizqOptions` are automatically used
 > as default options when enqueueing that job type.
 
 ```ts
-import { enqueue, enqueueBulk } from "@zizq-labs/zizq";
-
-await enqueue(client, {
+await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { userId: 42, template: "welcome" },
 });
 
-await enqueueBulk(client, [
+await client.enqueueBulk([
   { type: "send_email", queue: "emails", payload: { userId: 1 } },
   { type: "send_email", queue: "emails", payload: { userId: 2 } },
 ]);
 
-await enqueue(client, {
+await client.enqueue({
   type: sendEmail,
   payload: { userId: 42, template: "welcome" },
 });
@@ -37,12 +35,12 @@ Both accept either a string job `type` or a function reference with attached
 
 ## Single enqueue
 
-When enqueueing a single job, the `enqueue()` function returns the `Job`
+When enqueueing a single job, the `enqueue()` method returns the `Job`
 from the Zizq server, which provides all its metadata, such as `id`, `status`,
 `readyAt` etc. Note that `payload` is *not* part of the response.
 
 ```ts
-const result = await enqueue(client, {
+const result = await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { userId: 42, template: "welcome" },
@@ -57,7 +55,7 @@ array of inputs are provided, and an array of `Job` instances is returned in
 the order matching the inputs.
 
 ```ts
-const results = await enqueueBulk(client, [
+const results = await client.enqueueBulk([
   { type: "send_email", queue: "emails", payload: { userId: 1 } },
   { type: "send_email", queue: "emails", payload: { userId: 2 } },
 ]);
@@ -66,11 +64,11 @@ results.length // 2
 
 ## Enqueue options
 
-The following options are available on the inputs to `enqueue()` and
-`enqueueBulk()`. All of `type`, `queue` and `payload` are _required_ inputs,
-though [Job Functions](./handlers.md#job-functions) may specify their queue in
-`zizqOptions` meaning it is implicitly provided to `enqueue()` and
-`enqueueBulk()`.
+The following options are available on the inputs to `client.enqueue()` and
+`client.enqueueBulk()`. All of `type`, `queue` and `payload` are _required_
+inputs, though [Job Functions](./handlers.md#job-functions) may specify their
+queue in `zizqOptions`, meaning it is implicitly provided to `client.enqueue()`
+and `client.enqueueBulk()`.
 
 <table>
     <thead>

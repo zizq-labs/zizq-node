@@ -10,6 +10,8 @@
  * @module
  */
 
+import type { JobFunction } from "./handler.ts";
+
 /** Lifecycle status of a job. */
 export type JobStatus = "ready" | "in_flight" | "scheduled" | "completed" | "dead";
 
@@ -303,6 +305,88 @@ export interface ReplaceCronGroupOptions {
 
   /** Named collection of entries present in this group. */
   entries: CronEntryInput[];
+}
+
+/**
+ * Input for enqueueing a job.
+ *
+ * The `type` field accepts either a string job type name or a function
+ * reference with optional attached `zizqOptions`. When a function is provided,
+ * its `zizqOptions` supplies defaults for `queue`, `priority`, etc. These
+ * defaults can be overridden by inputs specified at enqueue-time.
+ *
+ * When `type` is a string, `queue` is required in the inputs.
+ *
+ * @example Function reference
+ * ```ts
+ * await client.enqueue({ type: sendEmail, payload: { to: "a@b.com" } });
+ * ```
+ *
+ * @example String type with explicit config
+ * ```ts
+ * await client.enqueue({
+ *   type: "send_email",
+ *   queue: "emails",
+ *   payload: { to: "a@b.com" },
+ *   priority: 100,
+ * });
+ * ```
+ */
+export interface EnqueueInput {
+  /** Job type — a function reference or a string type name. */
+  type: JobFunction | string;
+
+  /** Arbitrary payload delivered to the worker. */
+  payload: unknown;
+
+  /**
+   * Target queue name.
+   *
+   * Required when `type` is a string and no `zizqOptions.queue` default
+   * is available.
+   */
+  queue?: string;
+
+  /**
+   * Priority (lower = higher priority).
+   *
+   * Valid range is 0 to 65536. Default: 32768.
+   */
+  priority?: number;
+
+  /**
+   * Timestamp (ms since epoch) when the job becomes eligible.
+   *
+   * When set to a future timestamp the job is created in the "scheduled"
+   * status. Otherwise the job is created in the "ready" status.
+   */
+  readyAt?: number;
+
+  /**
+   * Per-job retry limit.
+   *
+   * When not set the server default value applies.
+   */
+  retryLimit?: number;
+
+  /** Per-job backoff configuration. */
+  backoff?: BackoffConfig;
+
+  /** Per-job retention configuration. */
+  retention?: RetentionConfig;
+
+  /**
+   * Unique key for enqueue-time deduplication.
+   *
+   * Requires a pro license on the server.
+   *
+   * The key is global across all queues and job types. Prefix with the job
+   * type to make it unique per job type.
+   */
+  uniqueKey?: string;
+
+  /** Uniqueness scope. Only valid when `uniqueKey` is set. */
+  uniqueWhile?: UniqueScope;
 }
 
 
