@@ -63,9 +63,7 @@ await worker.run();  // blocks until stopped
 Enqueueing jobs is just as direct:
 
 ```ts
-import { enqueue } from "@zizq-labs/zizq";
-
-await enqueue(client, {
+await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { to: "user@example.com" },

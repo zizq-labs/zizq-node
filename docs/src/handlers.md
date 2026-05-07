@@ -32,9 +32,7 @@ async function myHandler(job) {
 We can enqueue jobs intended for such a handler like this:
 
 ```ts
-import { enqueue } from "@zizq-labs/zizq";
-
-await enqueue(client, {
+await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { to: "user@example.com" },
@@ -75,9 +73,7 @@ itself for cases where your job function needs access to it.
 We can enqueue jobs intended for such a handler like this:
 
 ```ts
-import { enqueue } from "@zizq-labs/zizq";
-
-await enqueue(client, {
+await client.enqueue({
   type: sendEmail,
   queue: "emails",
   payload: { to: "user@example.com" },
@@ -123,9 +119,7 @@ Because `queue` is present in `zizqOptions` we do not need to specify it at
 enqueue-time, unless we want to explicitly override the queue:
 
 ```ts
-import { enqueue } from "@zizq-labs/zizq";
-
-await enqueue(client, {
+await client.enqueue({
   type: sendEmail,
   payload: { to: "user@example.com" },
 });
@@ -391,8 +385,8 @@ exampleJob.zizqOptions = {
 
 > [!TIP]
 > All `zizqOptions` settings, except `type`, can also be overridden explicitly
-> by passing any overrides directly to `enqueue()`, such as
-> `enqueue(client, {type: fn, queue: "other", payload: {hello: "world"}})`.
+> by passing any overrides directly to `client.enqueue()`, such as
+> `client.enqueue({type: fn, queue: "other", payload: {hello: "world"}})`.
 
 When the client generates parameters to send to the Zizq server, it reads the
 `zizqOptions` from the Job Function, resolves the result, and optionally passes

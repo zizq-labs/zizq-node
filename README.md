@@ -50,11 +50,11 @@ yarn add @zizq-labs/zizq
 Enqueueing a job.
 
 ```ts
-import { Client, enqueue } from "@zizq-labs/zizq";
+import { Client } from "@zizq-labs/zizq";
 
 const client = new Client({ url: "http://localhost:7890" });
 
-await enqueue(client, {
+await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { to: "user@example.com" },

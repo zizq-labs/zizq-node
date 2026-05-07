@@ -12,8 +12,8 @@
 
 import type { Client, CronEntryInput, ReplaceCronGroupOptions } from "./client.ts";
 import type { CronGroup, CronEntry } from "./resources.ts";
-import type { EnqueueOptions } from "./types.ts";
-import { type EnqueueInput, resolveInput } from "./enqueue.ts";
+import type { EnqueueOptions, EnqueueInput } from "./types.ts";
+import { resolveInput } from "./enqueue.ts";
 
 /**
  * A cron entry definition that accepts function references for the job type.

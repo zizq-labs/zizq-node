@@ -18,7 +18,7 @@ import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
 // Import from the installed package, NOT from source.
-import { Client, Worker, NotFoundError, ClientError, enqueue, enqueueBulk } from "@zizq-labs/zizq";
+import { Client, Worker, NotFoundError, ClientError } from "@zizq-labs/zizq";
 
 const noopLogger = {
   info() {},
@@ -51,7 +51,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("enqueue and get a job", async () => {
-    const job = await enqueue(client, {
+    const job = await client.enqueue({
       type: "test_job",
       queue: "integration",
       payload: { hello: "world" },
@@ -67,7 +67,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("enqueue bulk", async () => {
-    const jobs = await enqueueBulk(client, [
+    const jobs = await client.enqueueBulk([
       { type: "bulk_a", queue: "integration", payload: { n: 1 } },
       { type: "bulk_b", queue: "integration", payload: { n: 2 } },
       { type: "bulk_c", queue: "integration", payload: { n: 3 } },
@@ -81,7 +81,7 @@ describe("integration", { concurrency: 1 }, () => {
 
   it("worker processes jobs end-to-end", async () => {
     const count = 10;
-    await enqueueBulk(client, Array.from({ length: count }, (_, i) => ({
+    await client.enqueueBulk(Array.from({ length: count }, (_, i) => ({
       type: "worker_test",
       queue: "worker-integration",
       payload: { index: i },
@@ -115,7 +115,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("query jobs", async () => {
-    const job = await enqueue(client, {
+    const job = await client.enqueue({
       type: "query_test",
       queue: "query-integration",
       payload: { marker: "findme" },
@@ -132,7 +132,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("delete a job", async () => {
-    const job = await enqueue(client, {
+    const job = await client.enqueue({
       type: "delete_test",
       queue: "delete-integration",
       payload: {},
@@ -150,7 +150,7 @@ describe("integration", { concurrency: 1 }, () => {
     assert.equal(await client.jobs().isEmpty(), true);
     assert.equal(await client.jobs().count(), 0);
 
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "count_a", queue: "integration", payload: {} },
       { type: "count_b", queue: "integration", payload: {} },
       { type: "count_c", queue: "integration", payload: {} },
@@ -162,7 +162,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("query with jq filter", async () => {
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "jq_test", queue: "integration", payload: { priority: "high", region: "eu" } },
       { type: "jq_test", queue: "integration", payload: { priority: "low", region: "eu" } },
       { type: "jq_test", queue: "integration", payload: { priority: "high", region: "us" } },
@@ -182,7 +182,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("query with withPayload (exact match)", async () => {
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "wp_test", queue: "integration", payload: { action: "send", to: "alice" } },
       { type: "wp_test", queue: "integration", payload: { action: "send", to: "bob" } },
       { type: "wp_test", queue: "integration", payload: { action: "receive", to: "alice" } },
@@ -196,7 +196,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("query with withPayloadSubset (partial match)", async () => {
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "wps_test", queue: "integration", payload: { kind: "email", to: "alice", urgent: true } },
       { type: "wps_test", queue: "integration", payload: { kind: "email", to: "bob", urgent: false } },
       { type: "wps_test", queue: "integration", payload: { kind: "sms", to: "alice", urgent: true } },
@@ -217,7 +217,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("delete all jobs", async () => {
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "del_a", queue: "q1", payload: {} },
       { type: "del_b", queue: "q1", payload: {} },
       { type: "del_c", queue: "q2", payload: {} },
@@ -235,7 +235,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("update a job", async () => {
-    const job = await enqueue(client, {
+    const job = await client.enqueue({
       type: "update_test",
       queue: "integration",
       payload: { x: 1 },
@@ -251,7 +251,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   it("update all jobs", async () => {
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "upd_a", queue: "q1", payload: {}, priority: 100 },
       { type: "upd_b", queue: "q1", payload: {}, priority: 100 },
       { type: "upd_c", queue: "q2", payload: {}, priority: 100 },
@@ -275,7 +275,7 @@ describe("integration", { concurrency: 1 }, () => {
   it("countJobs", async () => {
     assert.equal(await client.countJobs(), 0);
 
-    await enqueueBulk(client, [
+    await client.enqueueBulk([
       { type: "count_a", queue: "q1", payload: {} },
       { type: "count_b", queue: "q1", payload: {} },
       { type: "count_c", queue: "q2", payload: {} },

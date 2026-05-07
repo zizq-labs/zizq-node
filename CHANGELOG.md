@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Support `client.enqueue()` directly and deprecate top-level `enqueue()`
+
 ## 0.3.0
 
 - Added support for cron scheduling

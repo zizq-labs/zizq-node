@@ -15,7 +15,7 @@ When enqueueing a job by its `type` string, the `uniqueKey` and optionally
 `uniqueWhile` must be manually provided in the enqueue inputs.
 
 ```ts
-await enqueue(client, {
+await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { userId: 42, template: "welcome" },
@@ -269,11 +269,11 @@ exampleJob.zizqOptions.uniqueKey(
 ## Enqueueing Unique Jobs
 
 Where a unique scope violation was encountered, the returned `Job` instance
-from `enqueue()` or `enqueueBulk()` will have the same `id` as the existing job
-and the `duplicate` flag will be set to `true`.
+from `client.enqueue()` or `client.enqueueBulk()` will have the same `id` as
+the existing job and the `duplicate` flag will be set to `true`.
 
 ```ts
-const result1 = await enqueue(client, {
+const result1 = await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { userId: 42, template: "welcome" },
@@ -283,7 +283,7 @@ const result1 = await enqueue(client, {
 result1.id // "03fu0wm75gxgmfyfplwvazhex"
 result1.duplicate // false
 
-const result2 = await enqueue(client, {
+const result2 = await client.enqueue({
   type: "send_email",
   queue: "emails",
   payload: { userId: 42, template: "welcome" },
@@ -295,7 +295,7 @@ result2.duplicate // true
 ```
 
 The same is true for
-[`enqueueBulk()`](./enqueueing-jobs.md#bulk-job-enqueueing).
+[`client.enqueueBulk()`](./enqueueing-jobs.md#bulk-job-enqueueing).
 
 This means your application generally does not need to treat duplicate enqueues
 as errors and can instead handle them idempotently.

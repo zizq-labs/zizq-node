@@ -17,7 +17,7 @@ import type {
   EnqueueOptions,
   RetentionConfig,
   UniqueScope,
-} from "./client.ts";
+} from "./types.ts";
 
 import type { Job } from "./resources.ts";
 
