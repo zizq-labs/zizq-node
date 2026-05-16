@@ -70,6 +70,25 @@ console.log(
     `(${enqueueRate} jobs/sec)`,
 );
 
+// --- Scan Phase ----
+
+const scanStart = performance.now();
+
+let scanned = 0;
+for await (const job of client.jobs().byQueue("node/bench").inPagesOf(2000)) {
+  if (job.id) scanned++;
+}
+
+const scanFinish = performance.now();
+const scanElapsed = (scanFinish - scanStart) / 1000;
+const scanRate = Math.round(scanned / scanElapsed);
+
+console.log(
+  `Scanned ${scanned} jobs ` +
+    `in ${scanElapsed.toFixed(2)}s ` +
+    `(${scanRate} jobs/sec)`,
+);
+
 // --- Dequeue Phase ----
 
 const dequeueStart = performance.now();
