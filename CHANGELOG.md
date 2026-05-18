@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2
+
+
 ## 0.3.1
 
 - Support `client.enqueue()` directly and deprecate top-level `enqueue()`
