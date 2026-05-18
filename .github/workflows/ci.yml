@@ -179,7 +179,8 @@ jobs:
           gh release create "v${version}" \
             --title "v${version}" \
             --notes-file release-notes.md \
-            artifacts/zizq-*
+            "artifacts/zizq-${version}.tgz" \
+            "artifacts/zizq-${version}.tgz.sha256"
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
