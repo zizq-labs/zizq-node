@@ -2,6 +2,13 @@
 
 ## 0.3.2
 
+- Added `connectTimeout`, `readTimeout`, and `streamIdleTimeout` options
+  on the `Client`. `connectTimeout` (default 10000ms) bounds the TCP/TLS
+  handshake; `readTimeout` (default 30000ms) bounds per-read inactivity
+  for RPC traffic; `streamIdleTimeout` (default 30000ms) bounds per-read
+  inactivity on the long-lived `/jobs/take` stream so dead connections
+  are detected and the `Worker` reconnects instead of waiting forever on
+  a zombie socket.
 
 ## 0.3.1
 

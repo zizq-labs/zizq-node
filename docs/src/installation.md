@@ -142,5 +142,49 @@ const client = new Client({
                 Default: <code>"json"</code>.
             </td>
         </tr>
+        <tr>
+            <td>
+                <div><code>connectTimeout</code></div>
+                <div><pre>number</pre></div>
+            </td>
+            <td>
+                Deadline in milliseconds for the TCP/TLS handshake when
+                establishing a new connection.
+                Default: <code>10000</code> (10s).
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>readTimeout</code></div>
+                <div><pre>number</pre></div>
+            </td>
+            <td>
+                Per-read timeout in milliseconds for API calls (enqueue,
+                queries, mutations &mdash; anything that isn't the
+                <code>take()</code> stream). Bounds the time between
+                consecutive bytes received from the server. A request whose
+                any single read exceeds this raises a
+                <code>ConnectionError</code>.
+                Default: <code>30000</code> (30s).
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>streamIdleTimeout</code></div>
+                <div><pre>number</pre></div>
+            </td>
+            <td>
+                Per-read timeout in milliseconds for the long-lived
+                <code>take()</code> stream consumed by the
+                <code>Worker</code>. The server sends heartbeats every
+                ~3 seconds, so each read returns within that window and
+                keeps the connection alive; the connection only times out
+                if the server falls silent for longer than this. The worker
+                catches the resulting error and reconnects with backoff.
+                Set well in excess of the server's heartbeat interval to
+                avoid false-positive disconnects.
+                Default: <code>30000</code> (30s).
+            </td>
+        </tr>
     </tbody>
 </table>

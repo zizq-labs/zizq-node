@@ -20,6 +20,22 @@ describe("Client", () => {
     await ctx.mockAgent.close();
   });
 
+  describe("constructor options", () => {
+    it("accepts connectTimeout, readTimeout, and streamIdleTimeout", () => {
+      // Smoke test that the new options are accepted independently.
+      // Actual socket-level enforcement is undici's job, not worth
+      // re-asserting at the unit level; the value here is catching
+      // API regressions if any option is renamed or removed.
+      const c = new Client({
+        url: "http://localhost:7890",
+        connectTimeout: 5_000,
+        readTimeout: 10_000,
+        streamIdleTimeout: 45_000,
+      });
+      assert.equal(c.url, "http://localhost:7890");
+    });
+  });
+
   const jobResponse = {
     id: "j1",
     type: "send_email",

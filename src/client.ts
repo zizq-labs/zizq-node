@@ -213,6 +213,38 @@ export interface ClientOptions {
   /** TLS configuration for HTTPS connections. */
   tls?: TlsOptions;
 
+  /**
+   * Connect timeout in milliseconds — deadline for the TCP/TLS
+   * handshake. Applies to every pool.
+   *
+   * Default: 10000 (10s).
+   */
+  connectTimeout?: number;
+
+  /**
+   * Per-read timeout in milliseconds for API traffic (enqueue,
+   * queries, mutations — anything that isn't the long-lived
+   * `take()` stream). Bounds the time between consecutive bytes
+   * received from the server.
+   *
+   * Default: 30000 (30s).
+   */
+  readTimeout?: number;
+
+  /**
+   * Per-read timeout in milliseconds for the long-lived
+   * `take()` stream consumed by {@link Worker}. The server's
+   * heartbeats (default ~3s) reset the clock on each frame, so this
+   * only fires when the connection has actually gone silent.
+   * Triggers a Worker reconnect via the standard error path.
+   *
+   * Should be comfortably above the server's heartbeat interval to
+   * avoid false-positive disconnects.
+   *
+   * Default: 30000 (30s).
+   */
+  streamIdleTimeout?: number;
+
   /** @internal For testing — override the HTTP dispatcher. */
   dispatcher?: Dispatcher;
 }
@@ -340,30 +372,56 @@ export class Client {
     this.accept = CONTENT_TYPES[this.format];
     this.streamAccept = STREAM_ACCEPT[this.format];
 
+    const connectTimeout = options.connectTimeout ?? 10_000;
+    const readTimeout = options.readTimeout ?? 30_000;
+    const streamIdleTimeout = options.streamIdleTimeout ?? 30_000;
+
     if (options.dispatcher) {
       // Testing: use the same dispatcher for both.
       this.http = options.dispatcher;
       this.streamHttp = options.dispatcher;
     } else {
-      const connectOpts = options.tls ? {
-        ca: options.tls.ca,
-        cert: options.tls.cert,
-        key: options.tls.key,
-      } : undefined;
+      const connectOpts = {
+        ...(options.tls ? {
+          ca: options.tls.ca,
+          cert: options.tls.cert,
+          key: options.tls.key,
+        } : {}),
+        timeout: connectTimeout,
+      };
 
       // HTTP/2 for request/response traffic (multiplexed acks, enqueues).
+      // `bodyTimeout` is per-chunk inactivity — reset on each byte —
+      // so it acts as the read timeout; `headersTimeout` caps
+      // "server accepted the request but didn't respond" cases.
       this.http = new Pool(this.url, {
         allowH2: true,
         connect: connectOpts,
+        headersTimeout: readTimeout,
+        bodyTimeout: readTimeout,
       });
 
       // HTTP/1.1 for the long-lived take stream. HTTP/2 adds framing
       // overhead and flow control with no multiplexing benefit on a
       // single long-lived response, resulting in measurably lower
       // throughput compared to HTTP/1.1 chunked transfer.
+      //
+      // `bodyTimeout` here uses `streamIdleTimeout` rather than the
+      // normal `readTimeout`: server heartbeats reset it on each frame,
+      // so this only fires when the connection has actually gone
+      // silent. The Worker's reconnect path handles the resulting
+      // BodyTimeoutError.
+      //
+      // `headersTimeout` stays on `readTimeout`: the response headers
+      // are a one-shot request/response pair like any other API call,
+      // only the body streams. Falling through to undici's 5-minute
+      // default would leave a server stuck pre-headers blocking the
+      // worker far longer than the user-configured timeout would suggest.
       this.streamHttp = new Pool(this.url, {
         allowH2: false,
         connect: connectOpts,
+        headersTimeout: readTimeout,
+        bodyTimeout: streamIdleTimeout,
       });
     }
   }
