@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- Added `Client.deleteAllCrons()` (`DELETE /crons`) — wipes every cron
+  group on the server in a single call, returning the deleted-group
+  count. Pro-only.
+- Added `Client.reset()` (`POST /reset`) — wipes every cron group and
+  every job in one request. Primarily intended as a setup/teardown
+  step for test suites that want a known-empty server between
+  scenarios. Also available as `Client.eraseAllData()`.
+- Requires Zizq server **0.4.0** or later for the new endpoints.
+
 ## 0.3.2
 
 - Added `connectTimeout`, `readTimeout`, and `streamIdleTimeout` options

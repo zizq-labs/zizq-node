@@ -607,6 +607,36 @@ export class Client {
   }
 
   /**
+   * Wipe *every* cron group and *every* job on the server.
+   *
+   * Equivalent to calling {@link deleteAllCrons} followed by
+   * {@link deleteAllJobs} (no filter), but in a single request. Useful
+   * primarily as a setup/teardown step in tests where you want a
+   * known-empty server between scenarios.
+   *
+   * **Destructive.** No filters, no escape hatch, no confirmation —
+   * the server-side operation simply returns once everything is gone.
+   *
+   * @example
+   * ```ts
+   * await client.reset();
+   * ```
+   */
+  async reset(): Promise<void> {
+    const res = await this.request("POST", "/reset");
+    if (res.statusCode !== 204) {
+      await this.throwOnError(res);
+    }
+  }
+
+  /**
+   * Alias for {@link reset}.
+   */
+  async eraseAllData(): Promise<void> {
+    return this.reset();
+  }
+
+  /**
    * Count jobs matching the given filters.
    *
    * @example
@@ -944,6 +974,23 @@ export class Client {
     if (res.statusCode !== 204) {
       await this.throwOnError(res);
     }
+  }
+
+  /**
+   * Delete every cron group on the server in a single call.
+   *
+   * Returns the number of cron groups removed.
+   *
+   * **Destructive.** This deletes *every cron group on the server*. For
+   * granular deletes, use {@link deleteCronGroup} with a specific name.
+   *
+   * Requires a Pro license on the server.
+   */
+  async deleteAllCrons(): Promise<number> {
+    const data = await this.handleResponse(
+      await this.request("DELETE", "/crons")
+    ) as DeleteJobsResponse;
+    return data.deleted;
   }
 
   /**
