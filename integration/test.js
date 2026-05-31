@@ -9,7 +9,7 @@
  * environment variable. The server lifecycle is managed by run.sh.
  *
  * Tests run sequentially (concurrency: 1) and each test starts with a
- * clean database (deleteAllJobs in beforeEach).
+ * clean database (`reset` in `beforeEach` — wipes jobs and cron groups).
  *
  * Run via: ZIZQ_URL=http://... node --test test.js
  */
@@ -43,7 +43,7 @@ describe("integration", { concurrency: 1 }, () => {
   });
 
   beforeEach(async () => {
-    await client.deleteAllJobs();
+    await client.reset();
   });
 
   after(async () => {
@@ -393,6 +393,30 @@ describe("integration", { concurrency: 1 }, () => {
 
       // Cleanup.
       await cron.delete();
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) {
+        return;
+      }
+      throw err;
+    }
+  });
+
+  it("cron: deleteAllCrons wipes every group", async () => {
+    try {
+      for (const name of ["wipe-a", "wipe-b"]) {
+        const cron = client.cron(name);
+        await cron.register({
+          entries: [
+            { name: "e", expression: "* * * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+          ],
+        });
+      }
+
+      const deleted = await client.deleteAllCrons();
+      assert.equal(deleted, 2);
+
+      const remaining = await client.listCronGroups();
+      assert.deepEqual(remaining, []);
     } catch (err) {
       if (err instanceof ClientError && err.status === 403) {
         return;

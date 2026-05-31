@@ -517,6 +517,37 @@ describe("Client", () => {
     });
   });
 
+  describe("deleteAllCrons", () => {
+    it("DELETEs /crons and returns the deleted count", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons", method: "DELETE" })
+        .reply(200, { deleted: 3 }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const count = await ctx.client.deleteAllCrons();
+      assert.equal(count, 3);
+    });
+  });
+
+  describe("reset", () => {
+    it("POSTs /reset and resolves on 204", async () => {
+      ctx.mockPool
+        .intercept({ path: "/reset", method: "POST" })
+        .reply(204, "");
+
+      await ctx.client.reset();
+    });
+
+    it("throws on non-204 responses", async () => {
+      ctx.mockPool
+        .intercept({ path: "/reset", method: "POST" })
+        .reply(500, "boom");
+
+      await assert.rejects(() => ctx.client.reset());
+    });
+  });
+
   describe("updateJob", () => {
     it("patches a job and returns the updated job", async () => {
       ctx.mockPool

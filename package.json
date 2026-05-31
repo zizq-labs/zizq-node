@@ -1,6 +1,6 @@
 {
   "name": "@zizq-labs/zizq",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Node.js client for the Zizq job queue server",
   "homepage": "https://zizq.io",
   "repository": {
