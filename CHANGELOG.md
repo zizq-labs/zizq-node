@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.1
+
+- Added `Router` class for type-based job dispatch, mirroring the Ruby
+  and Rust clients. Builder API with chainable `.route(type, handler)`
+  and `.fallback(handler)`, plus `.build()` returning a `JobHandler`
+  ready to pass to `Worker`. Routes overwrite on duplicate registration
+  to support builder-style composition (e.g. starting from a defaults
+  router and selectively overriding individual routes).
+- Added `UnknownJobTypeError`, thrown by the compiled handler when a
+  job arrives with no matching route and no fallback. Caught by the
+  worker's normal failure path: the job is nacked for retry, and
+  eventually dead-lettered once the retry limit is hit.
+- `buildHandler([...])` is now implemented on top of `Router`
+  internally; behaviour is unchanged.
+
 ## 0.4.0
 
 - Added `Client.deleteAllCrons()` (`DELETE /crons`) — wipes every cron

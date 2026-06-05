@@ -39,6 +39,88 @@ await client.enqueue({
 });
 ```
 
+## Router
+
+For more explicit dispatch — particularly in cross-language workflows
+where jobs are enqueued by another service that agrees on a `type` string
+with the consumer — the client ships a `Router`. Routes are registered
+explicitly against a type name, with a chainable builder API.
+
+```ts
+import { Router } from "@zizq-labs/zizq";
+
+const router = new Router()
+  .route("send_email", async (payload, job) => {
+    await mailer.send(payload.to, payload.subject);
+  })
+  .route("generate_report", async (payload) => {
+    await reports.generate(payload.id);
+  });
+
+const handler = router.build();
+```
+
+Handlers receive the unwrapped `payload` and the full `job` for cases where
+they need metadata. Most handlers only need the payload — JavaScript lets
+you ignore the second argument.
+
+We can enqueue jobs intended for the router like this:
+
+```ts
+await client.enqueue({
+  type: "send_email",
+  queue: "emails",
+  payload: { to: "user@example.com" },
+});
+```
+
+### Fallback handler
+
+If you want a catch-all for unknown job types — for example to delegate to
+another dispatcher, or to log unsupported types — register a `fallback`.
+Unlike route handlers, it receives the full `job` (not split into a
+payload/job pair) just like a top-level handler:
+
+```ts
+const router = new Router()
+  .route("send_email", async (payload) => { /* ... */ })
+  .fallback(async (job) => {
+    console.warn(`Unhandled job type: ${job.type}`);
+    throw new Error(`unsupported: ${job.type}`);
+  });
+```
+
+If no route matches and no fallback is registered, the router throws
+`UnknownJobTypeError`. The worker treats this like any other handler
+failure: the job is nacked, retried per the backoff policy, and eventually
+dead-lettered once the retry limit is hit.
+
+Fallbacks have the same signature as a compiled router, so you can delegate
+one router to another:
+
+```ts
+mainRouter.fallback(legacyRouter.build());
+```
+
+### Overriding routes
+
+Re-registering a type replaces the previous handler. This is convenient
+for composing routers — for example, starting from a base router and
+selectively overriding individual routes for a particular environment:
+
+```ts
+function baseRouter() {
+  return new Router()
+    .route("send_email", emailJob)
+    .route("generate_report", reportJob);
+}
+
+const router = baseRouter()
+  .route("send_email", async (payload) => {
+    // env-specific override
+  });
+```
+
 ## Job Functions
 
 The Node client also allows using the function name as an implicit `type` and
