@@ -111,7 +111,7 @@ jobs:
             server
 
       - name: Download client artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: zizq-node-package
           path: artifact
@@ -168,7 +168,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download package artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: zizq-node-package
           path: artifacts
