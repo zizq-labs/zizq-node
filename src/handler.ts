@@ -20,6 +20,7 @@ import type {
 } from "./types.ts";
 
 import type { Job } from "./resources.ts";
+import { Router } from "./router.ts";
 
 /**
  * Configuration that can be attached to a job function via `fn.zizqOptions`.
@@ -204,7 +205,8 @@ export interface JobFunction {
  *   functions resolve to the same type.
  */
 export function buildHandler(jobs: JobFunction[]): JobHandler {
-  const handlers = new Map<string, JobFunction>();
+  const seen = new Set<string>();
+  const router = new Router();
 
   for (const fn of jobs) {
     const typeName = fn.zizqOptions?.type ?? fn.name;
@@ -213,17 +215,12 @@ export function buildHandler(jobs: JobFunction[]): JobHandler {
         "Job function must have a name or zizqOptions.type"
       );
     }
-    if (handlers.has(typeName)) {
+    if (seen.has(typeName)) {
       throw new Error(`Duplicate job type registered: "${typeName}"`);
     }
-    handlers.set(typeName, fn);
+    seen.add(typeName);
+    router.route(typeName, fn);
   }
 
-  return async (job) => {
-    const fn = handlers.get(job.type);
-    if (!fn) {
-      throw new Error(`No handler registered for job type: ${job.type}`);
-    }
-    await fn(job.payload, job);
-  };
+  return router.build();
 }

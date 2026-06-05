@@ -66,7 +66,7 @@ describe("buildHandler", () => {
 
     await assert.rejects(
       () => handler(fakeJob),
-      /No handler registered for job type: unknown_type/
+      /No handler registered for job type "unknown_type"/
     );
   });
 

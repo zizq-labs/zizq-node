@@ -153,6 +153,34 @@ await client.enqueue({
 });
 ```
 
+For cross-language workflows or when you want explicit `type -> handler`
+registration with optional fallback, use `Router`. Routes match by job
+type (a string the producer agrees on with the consumer), and an
+optional `fallback` catches anything unmatched:
+
+```ts
+import { Router } from "@zizq-labs/zizq";
+
+const router = new Router()
+  .route("send_email", async (payload, job) => {
+    await mailer.send(payload.to, payload.subject);
+  })
+  .route("generate_report", async (payload) => {
+    await reports.generate(payload.id);
+  })
+  .fallback(async (job) => {
+    console.warn(`Unhandled job type: ${job.type}`);
+  });
+
+const worker = new Worker({ client, handler: router.build() });
+```
+
+Routes overwrite on re-registration, which makes it natural to compose
+routers — e.g. start from one that supplies defaults and selectively
+override individual routes. If no route matches and no fallback is
+registered, the router throws `UnknownJobTypeError`, which the worker
+treats like any other handler failure (retries, eventually dead-lettered).
+
 ### Running a worker
 
 A `Worker` streams jobs from the server, dispatches them through your

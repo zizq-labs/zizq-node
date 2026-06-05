@@ -63,6 +63,10 @@ export type {
   EnqueueTransform,
 } from "./handler.ts";
 
+export { Router, UnknownJobTypeError } from "./router.ts";
+
+export type { RouteHandler } from "./router.ts";
+
 export { Lazy, ErrorQuery, JobQuery } from "./query.ts";
 export type { ErrorQueryOptions, JobQueryOptions } from "./query.ts";
 
