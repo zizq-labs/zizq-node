@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2
+
+- Added HTTP/2 over cleartext (h2c) support for `http://` URLs via
+  undici's `useH2c` option, bringing Node up to parity with the Ruby
+  and Rust clients. Previously HTTP/2 multiplexing required TLS; now
+  any URL benefits from stream multiplexing over a single connection.
+  No server-side change required — the Zizq server's HTTP stack
+  already accepts HTTP/2 prior-knowledge on any connection.
+- Added `maxConcurrentStreams` option on `Client` (default 1024).
+  Sets the per-connection HTTP/2 stream concurrency the client
+  requests from the server via the `SETTINGS_MAX_CONCURRENT_STREAMS`
+  frame. The effective ceiling is `min(client, server)` — raising
+  this client-side only matters once the server is also configured
+  to allow more streams. Useful for high-concurrency workloads with
+  many in-flight enqueue/ack requests sharing one connection.
+
 ## 0.4.1
 
 - Added `Router` class for type-based job dispatch, mirroring the Ruby
