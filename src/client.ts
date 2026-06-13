@@ -245,6 +245,21 @@ export interface ClientOptions {
    */
   streamIdleTimeout?: number;
 
+  /**
+   * Maximum number of concurrent HTTP/2 streams per connection that
+   * undici will request from the server via the
+   * `SETTINGS_MAX_CONCURRENT_STREAMS` frame. The effective ceiling
+   * is the minimum of this value and what the server advertises in
+   * its own SETTINGS — so raising this client-side only helps if
+   * the server is also configured to allow more streams.
+   *
+   * Applies to the request/response pool only. The long-lived
+   * `take()` stream uses HTTP/1.1 and is unaffected.
+   *
+   * Default: 1024.
+   */
+  maxConcurrentStreams?: number;
+
   /** @internal For testing — override the HTTP dispatcher. */
   dispatcher?: Dispatcher;
 }
@@ -390,12 +405,24 @@ export class Client {
         timeout: connectTimeout,
       };
 
-      // HTTP/2 for request/response traffic (multiplexed acks, enqueues).
+      // HTTP/2 for request/response traffic (multiplexed acks,
+      // enqueues, queries). `useH2c: true` lets undici speak HTTP/2
+      // over cleartext via prior knowledge, so http:// URLs get h2
+      // multiplexing too — not just https://. The Zizq server's hyper
+      // stack already accepts h2 prior-knowledge on any connection
+      // via its auto-protocol detector.
+      //
       // `bodyTimeout` is per-chunk inactivity — reset on each byte —
       // so it acts as the read timeout; `headersTimeout` caps
       // "server accepted the request but didn't respond" cases.
       this.http = new Pool(this.url, {
         allowH2: true,
+        // `useH2c` is supported at runtime in undici >=8 but isn't
+        // present in the public type definitions yet. Remove the
+        // expect-error once undici ships the type.
+        // @ts-expect-error -- runtime-supported, untyped
+        useH2c: true,
+        maxConcurrentStreams: options.maxConcurrentStreams ?? 1024,
         connect: connectOpts,
         headersTimeout: readTimeout,
         bodyTimeout: readTimeout,
