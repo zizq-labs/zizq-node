@@ -794,6 +794,108 @@ describe("Client", () => {
     });
   });
 
+  describe("range filters", () => {
+    // The encoded query string sorts keys alphabetically when set via
+    // URLSearchParams in insertion order — the assertions below match the
+    // actual emitted order.
+
+    function emptyPage() {
+      return {
+        statusCode: 200,
+        body: { jobs: [], pages: { self: "/jobs" } },
+        headers: { "content-type": "application/json" } as Record<string, string>,
+      };
+    }
+
+    it("encodes priority as a single value", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?priority=50", method: "GET" })
+        .reply(200, emptyPage().body, { headers: emptyPage().headers });
+      await ctx.client.listJobs({ priority: 50 });
+    });
+
+    it("encodes priority as a bounded range", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?priority=0..100", method: "GET" })
+        .reply(200, emptyPage().body, { headers: emptyPage().headers });
+      await ctx.client.listJobs({ priority: { min: 0, max: 100 } });
+    });
+
+    it("encodes an endless range (min only)", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?priority=50..", method: "GET" })
+        .reply(200, emptyPage().body, { headers: emptyPage().headers });
+      await ctx.client.listJobs({ priority: { min: 50 } });
+    });
+
+    it("encodes a beginless range (max only)", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?priority=..100", method: "GET" })
+        .reply(200, emptyPage().body, { headers: emptyPage().headers });
+      await ctx.client.listJobs({ priority: { max: 100 } });
+    });
+
+    it("encodes readyAt and attempts together", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs?ready_at=..1735689600000&attempts=1..",
+          method: "GET",
+        })
+        .reply(200, emptyPage().body, { headers: emptyPage().headers });
+      await ctx.client.listJobs({
+        readyAt: { max: 1_735_689_600_000 },
+        attempts: { min: 1 },
+      });
+    });
+
+    it("throws for non-numeric range bounds", async () => {
+      await assert.rejects(
+        () => ctx.client.listJobs({ priority: { min: "x" as unknown as number } }),
+        /min.*finite number/,
+      );
+    });
+
+    it("throws for non-finite numbers", async () => {
+      await assert.rejects(
+        () => ctx.client.listJobs({ priority: Number.POSITIVE_INFINITY }),
+        /finite number/,
+      );
+    });
+
+    it("forwards range filters through countJobs", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count?priority=0..100", method: "GET" })
+        .reply(200, { count: 3 }, { headers: emptyPage().headers });
+      assert.equal(
+        await ctx.client.countJobs({ priority: { min: 0, max: 100 } }),
+        3,
+      );
+    });
+
+    it("forwards range filters through deleteAllJobs", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?attempts=1..", method: "DELETE" })
+        .reply(200, { deleted: 5 }, { headers: emptyPage().headers });
+      assert.equal(
+        await ctx.client.deleteAllJobs({ where: { attempts: { min: 1 } } }),
+        5,
+      );
+    });
+
+    it("forwards range filters through updateAllJobs", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?priority=200..", method: "PATCH" })
+        .reply(200, { patched: 3 }, { headers: emptyPage().headers });
+      assert.equal(
+        await ctx.client.updateAllJobs({
+          where: { priority: { min: 200 } },
+          apply: { priority: 100 },
+        }),
+        3,
+      );
+    });
+  });
+
   describe("listErrors", () => {
     it("returns a page of error records", async () => {
       ctx.mockPool

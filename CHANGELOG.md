@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.5.0
+
+- Added three new range filters on `Client.listJobs`,
+  `Client.countJobs`, `Client.deleteAllJobs`, and
+  `Client.updateAllJobs`: `priority`, `readyAt`, and `attempts`. Each
+  field accepts either a bare `number` for an exact match, or a
+  `{ min, max }` object for an **inclusive** range. Either side of the
+  range can be omitted for an unbounded end:
+
+      // Exact match
+      client.listJobs({ priority: 50 });
+
+      // Bounded range
+      client.listJobs({ priority: { min: 0, max: 100 } });
+
+      // Open-ended
+      client.listJobs({ readyAt: { max: Date.now() } });
+      client.listJobs({ attempts: { min: 1 } });
+
+  Non-finite numbers and non-object bound shapes throw `TypeError`
+  before any HTTP request is issued.
+
+- `JobQuery` gained matching builders: `byPriority`, `byReadyAt`,
+  `byAttempts`. They follow the existing `by*` convention (replace
+  rather than union) and integrate with `count`, `updateAll`,
+  `deleteAll`, and the pages iterator.
+
+- Added `RangeFilter` and `RangeBounds` types, exported from
+  `@zizq-labs/zizq`, for typing the new filter fields in user code.
+
+- Requires Zizq server **0.5.0** or later. Older servers will reject
+  requests that include any of the new query parameters with
+  `400 Bad Request`.
+
 ## 0.4.2
 
 - Added HTTP/2 over cleartext (h2c) support for `http://` URLs via

@@ -30,6 +30,13 @@ filter (using the `and` operator):
 * [`byJqFilter()`](#client.jobs-byJqFilter)
 * [`addJqFilter()`](#client.jobs-byJqFilter)
 
+These methods accept a single value or a `{ min, max }` range with inclusive
+bounds to filter on numeric job fields:
+
+* [`byPriority()`](#client.jobs-byPriority)
+* [`byReadyAt()`](#client.jobs-byReadyAt)
+* [`byAttempts()`](#client.jobs-byAttempts)
+
 These methods wrap `addJqFilter()` to find jobs enqueued with the specified
 payloads, or payload subsets.
 
@@ -183,6 +190,89 @@ for await (const job of client.jobs()
 // 03fvqm2ejnbjahvhaysw8ggq1: {"dimensions":{"width":594,"height":394}}
 // 03fvqm2ejnbjahvhayvtolt8p: {"dimensions":{"width":593,"height":393}}
 // 03fvqm2ejnbjahvhayx9j2rmx: {"dimensions":{"width":592,"height":392}}
+```
+
+### Range filters
+
+The `byPriority()`, `byReadyAt()`, and `byAttempts()` builders share a calling
+convention: each accepts either a single `number` (exact match) or a
+`{ min, max }` object (inclusive range). Either side can be omitted for an
+unbounded end.
+
+| Argument            | Meaning                                |
+| ------------------- | -------------------------------------- |
+| `n`                 | Exactly `n`.                           |
+| `{ min: a, max: b }`| Between `a` and `b`, inclusive.        |
+| `{ min: a }`        | At least `a`.                          |
+| `{ max: b }`        | At most `b`.                           |
+
+Non-finite numbers and unrecognised shapes throw `TypeError` before any HTTP
+request is issued.
+
+### `byPriority()` { #client.jobs-byPriority }
+
+Narrows the query down to jobs whose `priority` matches the given value or
+range. Lower numbers are higher priority.
+
+```ts
+await client.jobs().byPriority(0).count();
+// 4231
+
+await client.jobs().byPriority({ min: 100, max: 200 }).count();
+// 812
+
+await client.jobs().byQueue("emails").byPriority({ max: 100 }).count();
+// 39
+```
+
+### `byReadyAt()` { #client.jobs-byReadyAt }
+
+Narrows the query down to jobs whose `readyAt` (milliseconds since the Unix
+epoch) matches the given value or range. Use `Date.prototype.getTime()` to
+derive ms from a `Date` instance.
+
+```ts
+// Jobs that are eligible to run by now.
+await client.jobs()
+  .byStatus("scheduled")
+  .byReadyAt({ max: Date.now() })
+  .count();
+// 17
+
+// Jobs that will not become ready for at least another hour.
+await client.jobs()
+  .byReadyAt({ min: Date.now() + 3_600_000 })
+  .count();
+// 4
+
+// Jobs ready within a specific 24-hour window.
+const now = Date.now();
+await client.jobs()
+  .byReadyAt({ min: now, max: now + 86_400_000 })
+  .count();
+// 132
+```
+
+### `byAttempts()` { #client.jobs-byAttempts }
+
+Narrows the query down to jobs whose failure count matches the given value or
+range.
+
+```ts
+// Jobs that have never failed.
+await client.jobs().byAttempts(0).count();
+// 5021
+
+// Jobs that have failed at least once.
+await client.jobs().byAttempts({ min: 1 }).count();
+// 87
+
+// Jobs that have failed between 1 and 3 times (e.g. triaging flaky work).
+await client.jobs()
+  .byQueue("webhooks")
+  .byAttempts({ min: 1, max: 3 })
+  .count();
+// 14
 ```
 
 ### `withPayload()`, `withPayloadSubset()` { #client.jobs-withPayload }

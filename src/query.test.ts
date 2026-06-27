@@ -324,6 +324,49 @@ describe("JobQuery", () => {
       .toArray();
   });
 
+  it("byPriority encodes a bounded range", async () => {
+    ctx.mockPool
+      .intercept({ path: "/jobs?limit=2000&priority=0..100", method: "GET" })
+      .reply(200, { jobs: [], pages: { self: "/jobs" } },
+        { headers: { "content-type": "application/json" } });
+
+    await ctx.client.jobs().byPriority({ min: 0, max: 100 }).toArray();
+  });
+
+  it("byReadyAt encodes an open-ended upper range", async () => {
+    ctx.mockPool
+      .intercept({ path: "/jobs?limit=2000&ready_at=1735689600000..", method: "GET" })
+      .reply(200, { jobs: [], pages: { self: "/jobs" } },
+        { headers: { "content-type": "application/json" } });
+
+    await ctx.client.jobs().byReadyAt({ min: 1_735_689_600_000 }).toArray();
+  });
+
+  it("byAttempts encodes a single value", async () => {
+    ctx.mockPool
+      .intercept({ path: "/jobs?limit=2000&attempts=0", method: "GET" })
+      .reply(200, { jobs: [], pages: { self: "/jobs" } },
+        { headers: { "content-type": "application/json" } });
+
+    await ctx.client.jobs().byAttempts(0).toArray();
+  });
+
+  it("range filters compose with other builders", async () => {
+    ctx.mockPool
+      .intercept({
+        path: "/jobs?limit=2000&queue=emails&priority=0..100&attempts=1..",
+        method: "GET",
+      })
+      .reply(200, { jobs: [], pages: { self: "/jobs" } },
+        { headers: { "content-type": "application/json" } });
+
+    await ctx.client.jobs()
+      .byQueue("emails")
+      .byPriority({ min: 0, max: 100 })
+      .byAttempts({ min: 1 })
+      .toArray();
+  });
+
   it("addJqFilter composes with the existing filter via and", async () => {
     ctx.mockPool
       .intercept({

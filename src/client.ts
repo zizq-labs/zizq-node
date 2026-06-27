@@ -75,6 +75,8 @@ export type {
   JobFilter,
   DeleteAllJobsOptions,
   CronEntryInput,
+  RangeBounds,
+  RangeFilter,
   ReplaceCronGroupOptions,
 } from "./types.ts";
 
@@ -96,6 +98,7 @@ import type {
   JobFilter,
   DeleteAllJobsOptions,
   CronEntryInput,
+  RangeBounds,
   ReplaceCronGroupOptions,
 } from "./types.ts";
 
@@ -615,7 +618,7 @@ export class Client {
   async deleteAllJobs(options: DeleteAllJobsOptions = {}): Promise<number> {
     assertOnlyKeys("deleteAllJobs", options, ["where"]);
     const where = options.where ?? {};
-    assertOnlyKeys("deleteAllJobs.where", where, ["id", "status", "queue", "type", "filter"]);
+    assertOnlyKeys("deleteAllJobs.where", where, ["id", "status", "queue", "type", "filter", "priority", "readyAt", "attempts"]);
 
     // Build the filter params, then short-circuit if any array filter resolved
     // to empty — an empty filter matches nothing, and we don't want to
@@ -673,7 +676,7 @@ export class Client {
    * ```
    */
   async countJobs(where: JobFilter = {}): Promise<number> {
-    assertOnlyKeys("countJobs", where, ["id", "status", "queue", "type", "filter"]);
+    assertOnlyKeys("countJobs", where, ["id", "status", "queue", "type", "filter", "priority", "readyAt", "attempts"]);
 
     const params = buildJobFilter(where);
     if (isEmptyFilter(params)) return 0;
@@ -733,7 +736,7 @@ export class Client {
   async updateAllJobs(options: UpdateAllJobsOptions): Promise<number> {
     assertOnlyKeys("updateAllJobs", options, ["where", "apply"]);
     const where = options.where ?? {};
-    assertOnlyKeys("updateAllJobs.where", where, ["id", "status", "queue", "type", "filter"]);
+    assertOnlyKeys("updateAllJobs.where", where, ["id", "status", "queue", "type", "filter", "priority", "readyAt", "attempts"]);
 
     // Same empty-filter short-circuit as deleteAllJobs.
     const params = buildJobFilter(where);
@@ -1411,6 +1414,48 @@ function isEmptyFilter(params: URLSearchParams): boolean {
 }
 
 /**
+ * Encode a {@link RangeFilter} value into the server's query syntax.
+ *
+ * The four accepted shapes:
+ *
+ * - `number` (e.g. `50`) -> `"50"`
+ * - `{ min, max }` -> `"min..max"`
+ * - `{ min }` -> `"min.."`
+ * - `{ max }` -> `"..max"`
+ *
+ * Returns `undefined` for `null`/`undefined` so the caller can skip
+ * setting the param. Throws `TypeError` for any other shape (e.g. arrays,
+ * strings, objects with unknown keys).
+ */
+function encodeRange(value: number | RangeBounds | undefined | null): string | undefined {
+  if (value == null) return undefined;
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`range filter value must be a finite number, got ${value}`);
+    }
+    return String(value);
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(
+      `range filter must be a number or { min?, max? } object, got ${typeof value}`,
+    );
+  }
+
+  const { min, max } = value;
+  for (const [key, bound] of [["min", min], ["max", max]] as const) {
+    if (bound != null && (typeof bound !== "number" || !Number.isFinite(bound))) {
+      throw new TypeError(`range filter "${key}" must be a finite number, got ${typeof bound}`);
+    }
+  }
+
+  const lo = min != null ? String(min) : "";
+  const hi = max != null ? String(max) : "";
+  return `${lo}..${hi}`;
+}
+
+/**
  * Populate a {@link URLSearchParams} with the standard job filter fields.
  */
 function buildJobFilter(
@@ -1422,6 +1467,15 @@ function buildJobFilter(
   if (where.queue != null) params.set("queue", toCommaList(where.queue));
   if (where.type != null) params.set("type", toCommaList(where.type));
   if (where.filter != null) params.set("filter", where.filter);
+
+  const priority = encodeRange(where.priority);
+  if (priority != null) params.set("priority", priority);
+
+  const readyAt = encodeRange(where.readyAt);
+  if (readyAt != null) params.set("ready_at", readyAt);
+
+  const attempts = encodeRange(where.attempts);
+  if (attempts != null) params.set("attempts", attempts);
 
   return params;
 }
