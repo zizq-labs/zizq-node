@@ -199,6 +199,35 @@ export interface TakeOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * A range with inclusive bounds. Omit either side for an unbounded end.
+ *
+ * Used by the `priority`, `readyAt`, and `attempts` filter fields. An
+ * empty object (`{}`) is treated as a fully unbounded range.
+ */
+export interface RangeBounds {
+  /** Lower bound, inclusive. Omit for no lower bound. */
+  min?: number;
+
+  /** Upper bound, inclusive. Omit for no upper bound. */
+  max?: number;
+}
+
+/**
+ * A range filter that matches either a single value or a span of values.
+ *
+ * Pass a bare `number` for an exact match. Pass an object with `min` and/or
+ * `max` for a range — both bounds are **inclusive**. Omit either side for
+ * an unbounded end.
+ *
+ * @example
+ * priority: 50                   // exactly 50
+ * priority: { min: 0, max: 100 } // 0..100 inclusive
+ * priority: { min: 50 }          // 50 or higher
+ * priority: { max: 100 }         // 100 or lower
+ */
+export type RangeFilter = number | RangeBounds;
+
 /** Options for listing jobs with cursor-based pagination. */
 export interface ListJobsOptions {
   /** Cursor: start after this job ID (exclusive). */
@@ -221,6 +250,24 @@ export interface ListJobsOptions {
 
   /** Filter by job ID. Accepts a single value or an array. */
   id?: string | string[];
+
+  /**
+   * Filter by priority. Accepts an exact value or a `{min, max}` range
+   * with inclusive bounds. Lower numbers are higher priority.
+   */
+  priority?: RangeFilter;
+
+  /**
+   * Filter by `readyAt` (milliseconds since the Unix epoch). Accepts an
+   * exact value or a `{min, max}` range with inclusive bounds.
+   */
+  readyAt?: RangeFilter;
+
+  /**
+   * Filter by failure count. Accepts an exact value or a `{min, max}`
+   * range with inclusive bounds. `0` selects jobs that have never failed.
+   */
+  attempts?: RangeFilter;
 
   /** jq expression to filter jobs by payload. */
   filter?: string;
@@ -265,6 +312,24 @@ export interface JobFilter {
 
   /** Filter by job type. Accepts a single value or an array. */
   type?: string | string[];
+
+  /**
+   * Filter by priority. Accepts an exact value or a `{min, max}` range
+   * with inclusive bounds. Lower numbers are higher priority.
+   */
+  priority?: RangeFilter;
+
+  /**
+   * Filter by `readyAt` (milliseconds since the Unix epoch). Accepts an
+   * exact value or a `{min, max}` range with inclusive bounds.
+   */
+  readyAt?: RangeFilter;
+
+  /**
+   * Filter by failure count. Accepts an exact value or a `{min, max}`
+   * range with inclusive bounds. `0` selects jobs that have never failed.
+   */
+  attempts?: RangeFilter;
 
   /** jq expression to filter jobs by payload. */
   filter?: string;

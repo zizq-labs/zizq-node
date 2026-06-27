@@ -27,6 +27,7 @@ import type {
   Client,
   JobFilter,
   JobStatus,
+  RangeFilter,
   SortDirection,
   UpdateJobOptions,
 } from "./client.ts";
@@ -166,6 +167,15 @@ export interface JobQueryOptions {
   /** jq expression applied to the payload. */
   jqFilter?: string;
 
+  /** Priority filter — exact value or `{min, max}` inclusive range. */
+  priority?: RangeFilter;
+
+  /** `readyAt` filter (ms since epoch) — exact value or `{min, max}` range. */
+  readyAt?: RangeFilter;
+
+  /** Failure count filter — exact value or `{min, max}` inclusive range. */
+  attempts?: RangeFilter;
+
   /** Sort order. Default: "asc" (oldest first). */
   order?: SortDirection;
 
@@ -241,6 +251,9 @@ export class JobQuery extends Lazy<Job> {
   private _type?: string | string[];
   private _status?: JobStatus | JobStatus[];
   private _jqFilter?: string;
+  private _priority?: RangeFilter;
+  private _readyAt?: RangeFilter;
+  private _attempts?: RangeFilter;
   private _order?: SortDirection;
   private _limit?: number;
   private _pageSize?: number;
@@ -254,6 +267,9 @@ export class JobQuery extends Lazy<Job> {
     this._type = options.type;
     this._status = options.status;
     this._jqFilter = options.jqFilter;
+    this._priority = options.priority;
+    this._readyAt = options.readyAt;
+    this._attempts = options.attempts;
     this._order = options.order;
     this._limit = options.limit;
     this._pageSize = options.pageSize;
@@ -313,6 +329,56 @@ export class JobQuery extends Lazy<Job> {
     return this.rebuild({
       jqFilter: concat(this._jqFilter, `(${jqFilter})`).join(" and "),
     });
+  }
+
+  /**
+   * Filter by priority. Replaces any existing priority filter.
+   *
+   * Accepts an exact value (`50`) or a `{min, max}` range with inclusive
+   * bounds. Omit either side for an unbounded end. Lower numbers are
+   * higher priority.
+   *
+   * @example
+   * client.jobs().byPriority(0);                  // exact match
+   * client.jobs().byPriority({ min: 0, max: 100 }); // bounded range
+   * client.jobs().byPriority({ min: 100 });        // 100 or higher
+   * client.jobs().byPriority({ max: 100 });        // 100 or lower
+   */
+  byPriority(priority: RangeFilter | undefined): JobQuery {
+    return this.rebuild({ priority });
+  }
+
+  /**
+   * Filter by `readyAt` (ms since epoch). Replaces any existing filter.
+   *
+   * Accepts an exact value or a `{min, max}` range with inclusive bounds.
+   * Use `Date.prototype.getTime()` to derive ms from a `Date` instance.
+   *
+   * @example
+   * // Eligible to run by now.
+   * client.jobs().byReadyAt({ max: Date.now() });
+   *
+   * // Within the next hour.
+   * client.jobs().byReadyAt({ min: Date.now(), max: Date.now() + 3_600_000 });
+   */
+  byReadyAt(readyAt: RangeFilter | undefined): JobQuery {
+    return this.rebuild({ readyAt });
+  }
+
+  /**
+   * Filter by failure count. Replaces any existing attempts filter.
+   *
+   * Accepts an exact value or a `{min, max}` range with inclusive bounds.
+   * `0` selects jobs that have never failed; `{ min: 1 }` selects anything
+   * that has failed at least once.
+   *
+   * @example
+   * client.jobs().byAttempts(0);                 // never failed
+   * client.jobs().byAttempts({ min: 1 });        // has failed
+   * client.jobs().byAttempts({ min: 1, max: 3 }); // 1, 2, or 3 failures
+   */
+  byAttempts(attempts: RangeFilter | undefined): JobQuery {
+    return this.rebuild({ attempts });
   }
 
   /**
@@ -567,6 +633,9 @@ export class JobQuery extends Lazy<Job> {
       type: this._type,
       status: this._status,
       filter: this._jqFilter,
+      priority: this._priority,
+      readyAt: this._readyAt,
+      attempts: this._attempts,
       order: this._order,
       limit: effectivePageSize,
     });
@@ -592,6 +661,9 @@ export class JobQuery extends Lazy<Job> {
       type: this._type,
       status: this._status,
       filter: this._jqFilter,
+      priority: this._priority,
+      readyAt: this._readyAt,
+      attempts: this._attempts,
     };
   }
 
@@ -602,6 +674,9 @@ export class JobQuery extends Lazy<Job> {
       type: this._type,
       status: this._status,
       jqFilter: this._jqFilter,
+      priority: this._priority,
+      readyAt: this._readyAt,
+      attempts: this._attempts,
       order: this._order,
       limit: this._limit,
       pageSize: this._pageSize,
