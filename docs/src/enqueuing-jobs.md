@@ -11,23 +11,25 @@ The Zizq Node client exposes two enqueue methods:
 > passed directly as the `type`, and any `zizqOptions` are automatically used
 > as default options when enqueueing that job type.
 
-```ts
-await client.enqueue({
-  type: "send_email",
-  queue: "emails",
-  payload: { userId: 42, template: "welcome" },
-});
-
-await client.enqueueBulk([
-  { type: "send_email", queue: "emails", payload: { userId: 1 } },
-  { type: "send_email", queue: "emails", payload: { userId: 2 } },
-]);
-
-await client.enqueue({
-  type: sendEmail,
-  payload: { userId: 42, template: "welcome" },
-});
-```
+> JS:
+>
+> ```ts
+> await client.enqueue({
+>   type: "send_email",
+>   queue: "emails",
+>   payload: { userId: 42, template: "welcome" },
+> });
+> 
+> await client.enqueueBulk([
+>   { type: "send_email", queue: "emails", payload: { userId: 1 } },
+>   { type: "send_email", queue: "emails", payload: { userId: 2 } },
+> ]);
+> 
+> await client.enqueue({
+>   type: sendEmail,
+>   payload: { userId: 42, template: "welcome" },
+> });
+> ```
 
 Both accept either a string job `type` or a function reference with attached
 `zizqOptions`, which lets the function itself carry its default `queue`,
@@ -39,14 +41,16 @@ When enqueueing a single job, the `enqueue()` method returns the `Job`
 from the Zizq server, which provides all its metadata, such as `id`, `status`,
 `readyAt` etc. Note that `payload` is *not* part of the response.
 
-```ts
-const result = await client.enqueue({
-  type: "send_email",
-  queue: "emails",
-  payload: { userId: 42, template: "welcome" },
-});
-result.id // "03fu0wm75gxgmfyfplwvazhex"
-```
+> JS:
+>
+> ```ts
+> const result = await client.enqueue({
+>   type: "send_email",
+>   queue: "emails",
+>   payload: { userId: 42, template: "welcome" },
+> });
+> result.id // "03fu0wm75gxgmfyfplwvazhex"
+> ```
 
 ## Bulk enqueue
 
@@ -54,13 +58,15 @@ Bulk enqueue works exactly the same as a single job enqueue, except that an
 array of inputs are provided, and an array of `Job` instances is returned in
 the order matching the inputs.
 
-```ts
-const results = await client.enqueueBulk([
-  { type: "send_email", queue: "emails", payload: { userId: 1 } },
-  { type: "send_email", queue: "emails", payload: { userId: 2 } },
-]);
-results.length // 2
-```
+> JS:
+>
+> ```ts
+> const results = await client.enqueueBulk([
+>   { type: "send_email", queue: "emails", payload: { userId: 1 } },
+>   { type: "send_email", queue: "emails", payload: { userId: 2 } },
+> ]);
+> results.length // 2
+> ```
 
 ## Enqueue options
 

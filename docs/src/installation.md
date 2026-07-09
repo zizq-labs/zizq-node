@@ -7,15 +7,19 @@
 The official [Zizq Node Client](https://www.npmjs.com/package/@zizq-labs/zizq)
 is available on npm. Install it with your package manager of choice:
 
-```shell
-$ npm install @zizq-labs/zizq
-```
+> Command:
+>
+> ```bash
+> $ npm install @zizq-labs/zizq
+> ```
 
 or
 
-```shell
-$ yarn add @zizq-labs/zizq
-```
+> Command:
+>
+> ```bash
+> $ yarn add @zizq-labs/zizq
+> ```
 
 ## Versioning
 
@@ -53,17 +57,19 @@ desired options. There is no global configuration object.
 > left as an exercise for the reader. Examples here are hard-coded for
 > clarity.
 
-```ts
-import { Client } from "@zizq-labs/zizq";
-
-const client = new Client({
-  url: "https://host.your.network:7890",
-  format: "json",
-  tls: {
-    ca: fs.readFileSync("/path/to/server-ca-cert.pem"),
-  },
-});
-```
+> JS:
+>
+> ```ts
+> import { Client } from "@zizq-labs/zizq";
+> 
+> const client = new Client({
+>   url: "https://host.your.network:7890",
+>   format: "json",
+>   tls: {
+>     ca: fs.readFileSync("/path/to/server-ca-cert.pem"),
+>   },
+> });
+> ```
 
 > [!CAUTION]
 > If your server is exposed directly to the internet, it should be using

@@ -39,36 +39,40 @@ a set of `async` functions that just take the `payload` (JSON) and process it.
 
 A minimal worker looks like this:
 
-```ts
-import { Client, Worker } from "@zizq-labs/zizq";
-
-const client = new Client({ url: "http://localhost:7890" });
-
-const worker = new Worker({
-  client,
-  concurrency: 25,
-  queues: ["emails"],
-  handler: async (job) => {
-    // your application logic here
-    console.log("processing", job.id, job.type, job.payload);
-  },
-});
-
-process.on("SIGINT",  () => worker.stop());
-process.on("SIGTERM", () => worker.stop());
-
-await worker.run();  // blocks until stopped
-```
+> JS:
+>
+> ```ts
+> import { Client, Worker } from "@zizq-labs/zizq";
+> 
+> const client = new Client({ url: "http://localhost:7890" });
+> 
+> const worker = new Worker({
+>   client,
+>   concurrency: 25,
+>   queues: ["emails"],
+>   handler: async (job) => {
+>     // your application logic here
+>     console.log("processing", job.id, job.type, job.payload);
+>   },
+> });
+> 
+> process.on("SIGINT",  () => worker.stop());
+> process.on("SIGTERM", () => worker.stop());
+> 
+> await worker.run();  // blocks until stopped
+> ```
 
 Enqueueing jobs is just as direct:
 
-```ts
-await client.enqueue({
-  type: "send_email",
-  queue: "emails",
-  payload: { to: "user@example.com" },
-});
-```
+> JS:
+>
+> ```ts
+> await client.enqueue({
+>   type: "send_email",
+>   queue: "emails",
+>   payload: { to: "user@example.com" },
+> });
+> ```
 
 The `Worker` dequeues jobs from the server and calls your handler function
 for each one. If the handler resolves successfully, the job is acknowledged.
