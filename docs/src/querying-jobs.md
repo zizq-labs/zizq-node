@@ -74,57 +74,63 @@ helpers are also included and chainable directly onto the query (`toArray()`,
 
 Narrows the query down to a given `id` or set of `id`s.
 
-```ts
-for await (job of client.jobs().byId("03fvmay0zcoskwdf2sm0u94aw")) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvmay0zcoskwdf2sm0u94aw: {"greet":"World"}
-
-for await (const job of client.jobs()
-    .byId("03fvmay0zcoskwdf2sm0u94aw")
-    .addId("03fvqg68ra0od9u1b8m0txgka")) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvmay0zcoskwdf2sm0u94aw: {"greet":"World"}
-// 03fvqg68ra0od9u1b8m0txgka: {"greet":"Moon"}
-
-await client
-  .jobs()
-  .byId("03fvmay0zcoskwdf2sm0u94aw")
-  .addId("03fvqg68ra0od9u1b8m0txgka")
-  .count(); // 2
-```
+> JS:
+>
+> ```ts
+> for await (job of client.jobs().byId("03fvmay0zcoskwdf2sm0u94aw")) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvmay0zcoskwdf2sm0u94aw: {"greet":"World"}
+> 
+> for await (const job of client.jobs()
+>     .byId("03fvmay0zcoskwdf2sm0u94aw")
+>     .addId("03fvqg68ra0od9u1b8m0txgka")) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvmay0zcoskwdf2sm0u94aw: {"greet":"World"}
+> // 03fvqg68ra0od9u1b8m0txgka: {"greet":"Moon"}
+> 
+> await client
+>   .jobs()
+>   .byId("03fvmay0zcoskwdf2sm0u94aw")
+>   .addId("03fvqg68ra0od9u1b8m0txgka")
+>   .count(); // 2
+> ```
 
 ### `byQueue()`, `addQueue()` { #client.jobs-byQueue }
 
 Narrows the query down to a given `queue` or set of `queue`s.
 
-```ts
-await client.jobs().byQueue("analytics").count();
-// 90
-
-await client.jobs().byQueue(["analytics", "example"]).count();
-// 93
-
-await client.jobs().byQueue(["analytics", "example"]).addQueue("comms").count();
-// 3631
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byQueue("analytics").count();
+> // 90
+> 
+> await client.jobs().byQueue(["analytics", "example"]).count();
+> // 93
+> 
+> await client.jobs().byQueue(["analytics", "example"]).addQueue("comms").count();
+> // 3631
+> ```
 
 ### `byType()`, `addType()` { #client.jobs-byType }
 
 Narrows the query down to a given `type` or set of `type`s.
 
-```ts
-await client.jobs().byQueue("default").byType("process_video").count();
-// 401
-
-await client.jobs()
-  .byQueue("default")
-  .byType("process_video")
-  .addType("clear_notes")
-  .count();
-// 491
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byQueue("default").byType("process_video").count();
+> // 401
+> 
+> await client.jobs()
+>   .byQueue("default")
+>   .byType("process_video")
+>   .addType("clear_notes")
+>   .count();
+> // 491
+> ```
 
 ### `byStatus()`, `addStatus()` { #client.jobs-byStatus }
 
@@ -138,16 +144,18 @@ Valid statuses are:
 * `completed`
 * `dead`
 
-```ts
-await client.jobs().byStatus(["scheduled", "ready"]).count();
-// 5003
-
-await client.jobs().byStatus("ready").count();
-// 4993
-
-await client.jobs().byQueue("default").byStatus("ready").addStatus("scheduled").count();
-// 491
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byStatus(["scheduled", "ready"]).count();
+> // 5003
+> 
+> await client.jobs().byStatus("ready").count();
+> // 4993
+> 
+> await client.jobs().byQueue("default").byStatus("ready").addStatus("scheduled").count();
+> // 491
+> ```
 
 ### `byJqFilter()`, `addJqFilter()` { #client.jobs-byJqFilter }
 
@@ -160,37 +168,39 @@ expressions.
 > on the [jaq website](https://gedenkt.at/jaq/manual/#corelang) or on
 > [jq](https://jqlang.org/manual/#basic-filters).
 
-```ts
-for await (const job of client.jobs()
-    .byType("hello_world")
-    .byJqFilter('.greet == "Moon"')) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvqg68ra0od9u1b8m0txgka: {"greet":"Moon"}
-
-for await (const job of client.jobs()
-    .byType("hello_world")
-    .byJqFilter('.greet | contains("o")')) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvmay0zcoskwdf2sm0u94aw: {"greet":"World"}
-// 03fvqg68ra0od9u1b8m0txgka: {"greet":"Moon"}
-
-for await (const job of client.jobs()
-    .byType("process_video")
-    .byJqFilter('.dimensions.width <= 600')) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvqm2ejnbjahvhayikrkltr: {"dimensions":{"width":600,"height":400}}
-// 03fvqm2ejnbjahvhayk0y3i9k: {"dimensions":{"width":599,"height":399}}
-// 03fvqm2ejnbjahvhaykq7d4fh: {"dimensions":{"width":598,"height":398}}
-// 03fvqm2ejnbjahvhaynwu2ije: {"dimensions":{"width":597,"height":397}}
-// 03fvqm2ejnbjahvhaypw8nkng: {"dimensions":{"width":596,"height":396}}
-// 03fvqm2ejnbjahvhayr7ytglw: {"dimensions":{"width":595,"height":395}}
-// 03fvqm2ejnbjahvhaysw8ggq1: {"dimensions":{"width":594,"height":394}}
-// 03fvqm2ejnbjahvhayvtolt8p: {"dimensions":{"width":593,"height":393}}
-// 03fvqm2ejnbjahvhayx9j2rmx: {"dimensions":{"width":592,"height":392}}
-```
+> JS:
+>
+> ```ts
+> for await (const job of client.jobs()
+>     .byType("hello_world")
+>     .byJqFilter('.greet == "Moon"')) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvqg68ra0od9u1b8m0txgka: {"greet":"Moon"}
+> 
+> for await (const job of client.jobs()
+>     .byType("hello_world")
+>     .byJqFilter('.greet | contains("o")')) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvmay0zcoskwdf2sm0u94aw: {"greet":"World"}
+> // 03fvqg68ra0od9u1b8m0txgka: {"greet":"Moon"}
+> 
+> for await (const job of client.jobs()
+>     .byType("process_video")
+>     .byJqFilter('.dimensions.width <= 600')) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvqm2ejnbjahvhayikrkltr: {"dimensions":{"width":600,"height":400}}
+> // 03fvqm2ejnbjahvhayk0y3i9k: {"dimensions":{"width":599,"height":399}}
+> // 03fvqm2ejnbjahvhaykq7d4fh: {"dimensions":{"width":598,"height":398}}
+> // 03fvqm2ejnbjahvhaynwu2ije: {"dimensions":{"width":597,"height":397}}
+> // 03fvqm2ejnbjahvhaypw8nkng: {"dimensions":{"width":596,"height":396}}
+> // 03fvqm2ejnbjahvhayr7ytglw: {"dimensions":{"width":595,"height":395}}
+> // 03fvqm2ejnbjahvhaysw8ggq1: {"dimensions":{"width":594,"height":394}}
+> // 03fvqm2ejnbjahvhayvtolt8p: {"dimensions":{"width":593,"height":393}}
+> // 03fvqm2ejnbjahvhayx9j2rmx: {"dimensions":{"width":592,"height":392}}
+> ```
 
 ### Range filters
 
@@ -214,16 +224,18 @@ request is issued.
 Narrows the query down to jobs whose `priority` matches the given value or
 range. Lower numbers are higher priority.
 
-```ts
-await client.jobs().byPriority(0).count();
-// 4231
-
-await client.jobs().byPriority({ min: 100, max: 200 }).count();
-// 812
-
-await client.jobs().byQueue("emails").byPriority({ max: 100 }).count();
-// 39
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byPriority(0).count();
+> // 4231
+> 
+> await client.jobs().byPriority({ min: 100, max: 200 }).count();
+> // 812
+> 
+> await client.jobs().byQueue("emails").byPriority({ max: 100 }).count();
+> // 39
+> ```
 
 ### `byReadyAt()` { #client.jobs-byReadyAt }
 
@@ -231,125 +243,135 @@ Narrows the query down to jobs whose `readyAt` (milliseconds since the Unix
 epoch) matches the given value or range. Use `Date.prototype.getTime()` to
 derive ms from a `Date` instance.
 
-```ts
-// Jobs that are eligible to run by now.
-await client.jobs()
-  .byStatus("scheduled")
-  .byReadyAt({ max: Date.now() })
-  .count();
-// 17
-
-// Jobs that will not become ready for at least another hour.
-await client.jobs()
-  .byReadyAt({ min: Date.now() + 3_600_000 })
-  .count();
-// 4
-
-// Jobs ready within a specific 24-hour window.
-const now = Date.now();
-await client.jobs()
-  .byReadyAt({ min: now, max: now + 86_400_000 })
-  .count();
-// 132
-```
+> JS:
+>
+> ```ts
+> // Jobs that are eligible to run by now.
+> await client.jobs()
+>   .byStatus("scheduled")
+>   .byReadyAt({ max: Date.now() })
+>   .count();
+> // 17
+> 
+> // Jobs that will not become ready for at least another hour.
+> await client.jobs()
+>   .byReadyAt({ min: Date.now() + 3_600_000 })
+>   .count();
+> // 4
+> 
+> // Jobs ready within a specific 24-hour window.
+> const now = Date.now();
+> await client.jobs()
+>   .byReadyAt({ min: now, max: now + 86_400_000 })
+>   .count();
+> // 132
+> ```
 
 ### `byAttempts()` { #client.jobs-byAttempts }
 
 Narrows the query down to jobs whose failure count matches the given value or
 range.
 
-```ts
-// Jobs that have never failed.
-await client.jobs().byAttempts(0).count();
-// 5021
-
-// Jobs that have failed at least once.
-await client.jobs().byAttempts({ min: 1 }).count();
-// 87
-
-// Jobs that have failed between 1 and 3 times (e.g. triaging flaky work).
-await client.jobs()
-  .byQueue("webhooks")
-  .byAttempts({ min: 1, max: 3 })
-  .count();
-// 14
-```
+> JS:
+>
+> ```ts
+> // Jobs that have never failed.
+> await client.jobs().byAttempts(0).count();
+> // 5021
+> 
+> // Jobs that have failed at least once.
+> await client.jobs().byAttempts({ min: 1 }).count();
+> // 87
+> 
+> // Jobs that have failed between 1 and 3 times (e.g. triaging flaky work).
+> await client.jobs()
+>   .byQueue("webhooks")
+>   .byAttempts({ min: 1, max: 3 })
+>   .count();
+> // 14
+> ```
 
 ### `withPayload()`, `withPayloadSubset()` { #client.jobs-withPayload }
 
 These methods  match jobs on the queue by wrapping `addJqFilter` internally.
 You can match either using exact payloads, or on just a subset of the payload (N positional array elements for arrays, partial object match for objects).
 
-```ts
-for await (const job of client.jobs()
-    .withPayload({dimensions: {width: 223, height: 180}})) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvqm2ejnbjahvhbao96krod: {"dimensions":{"width":223,"height":180}}
-
-for await (const job of client.jobs()
-    .withPayload({dimensions: {width: 2, height: 1}})) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// (no output)
-
-for await (const job of client.jobs()
-    .withPayloadSubset({dimensions: {width: 223}})) {
-  console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
-}
-// 03fvqm2ejnbjahvhbao96krod: {"dimensions":{"width":223,"height":180}}
-```
+> JS:
+>
+> ```ts
+> for await (const job of client.jobs()
+>     .withPayload({dimensions: {width: 223, height: 180}})) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvqm2ejnbjahvhbao96krod: {"dimensions":{"width":223,"height":180}}
+> 
+> for await (const job of client.jobs()
+>     .withPayload({dimensions: {width: 2, height: 1}})) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // (no output)
+> 
+> for await (const job of client.jobs()
+>     .withPayloadSubset({dimensions: {width: 223}})) {
+>   console.log(`${job.id}: ${JSON.stringify(job.payload)}`);
+> }
+> // 03fvqm2ejnbjahvhbao96krod: {"dimensions":{"width":223,"height":180}}
+> ```
 
 ### `order()` { #client.jobs-order }
 
 Changes the sort order in which results are returned. Use either  `"asc"` or
 `"desc"`. The default is `"asc"`.
 
-```ts
-for await (const job of client.jobs().byStatus("scheduled")) {
-  console.log(job.id);
-}
-// 03fvmay0zcoskwdf2sm0u94aw
-// 03fvqg4qxj39zecl43gnwwh04
-// 03fvqg68ra0od9u1b8m0txgka
-// 03fvqhdcqsftfxrzb6xc8acjy
-// 03fvqhdcqsftfxrzb6zq57rqs
-// 03fvqhdcqsftfxrzb71cxvk13
-// 03fvqhdcqsftfxrzb74afpg6x
-// 03fvqhdcqsftfxrzb75rabbrt
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb7a5g3hpm
-
-for await (const job of client.jobs().byStatus("scheduled").order("desc")) {
-  console.log(job.id);
-}
-// 03fvqhdcqsftfxrzb7a5g3hpm
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb75rabbrt
-// 03fvqhdcqsftfxrzb74afpg6x
-// 03fvqhdcqsftfxrzb71cxvk13
-// 03fvqhdcqsftfxrzb6zq57rqs
-// 03fvqhdcqsftfxrzb6xc8acjy
-// 03fvqg68ra0od9u1b8m0txgka
-// 03fvqg4qxj39zecl43gnwwh04
-// 03fvmay0zcoskwdf2sm0u94aw
-```
+> JS:
+>
+> ```ts
+> for await (const job of client.jobs().byStatus("scheduled")) {
+>   console.log(job.id);
+> }
+> // 03fvmay0zcoskwdf2sm0u94aw
+> // 03fvqg4qxj39zecl43gnwwh04
+> // 03fvqg68ra0od9u1b8m0txgka
+> // 03fvqhdcqsftfxrzb6xc8acjy
+> // 03fvqhdcqsftfxrzb6zq57rqs
+> // 03fvqhdcqsftfxrzb71cxvk13
+> // 03fvqhdcqsftfxrzb74afpg6x
+> // 03fvqhdcqsftfxrzb75rabbrt
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> 
+> for await (const job of client.jobs().byStatus("scheduled").order("desc")) {
+>   console.log(job.id);
+> }
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb75rabbrt
+> // 03fvqhdcqsftfxrzb74afpg6x
+> // 03fvqhdcqsftfxrzb71cxvk13
+> // 03fvqhdcqsftfxrzb6zq57rqs
+> // 03fvqhdcqsftfxrzb6xc8acjy
+> // 03fvqg68ra0od9u1b8m0txgka
+> // 03fvqg4qxj39zecl43gnwwh04
+> // 03fvmay0zcoskwdf2sm0u94aw
+> ```
 
 ### `limit()` { #client.jobs-limit }
 
 Changes the maximum number of total results returned by the query.
 
-```ts
-for await (const job of client.jobs()
-    .byStatus("scheduled")
-    .order("desc")
-    .limit(3)) {
-  console.log(job.id);
-}
-// 03fvqhdcqsftfxrzb7a5g3hpm
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb75rabbrt
-```
+> JS:
+>
+> ```ts
+> for await (const job of client.jobs()
+>     .byStatus("scheduled")
+>     .order("desc")
+>     .limit(3)) {
+>   console.log(job.id);
+> }
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb75rabbrt
+> ```
 
 ### `inPagesOf()` { #client.jobs-inPagesOf }
 
@@ -361,48 +383,50 @@ specifying `inPagesOf()`, these operations apply to the entire result set in a
 single transaction. When `inPagesOf()` is specified, the bulk delete or update
 is done in a batched manner.
 
-```ts
-for await (const job of client.jobs().byStatus("scheduled").inPagesOf(2)) {
-  console.log(job.id);
-}
-// 03fvmay0zcoskwdf2sm0u94aw
-// 03fvqg4qxj39zecl43gnwwh04
-// 03fvqg68ra0od9u1b8m0txgka
-// 03fvqhdcqsftfxrzb6xc8acjy
-// 03fvqhdcqsftfxrzb6zq57rqs
-// 03fvqhdcqsftfxrzb71cxvk13
-// 03fvqhdcqsftfxrzb74afpg6x
-// 03fvqhdcqsftfxrzb75rabbrt
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb7a5g3hpm
-
-let pageNum = 1;
-for await (const page of client.jobs()
-    .byStatus("scheduled")
-    .inPagesOf(2)
-    .pages()) {
-  console.log(`Page ${pageNum}`);
-  for (const job of page.jobs) {
-    console.log(job.id);
-  }
-  pageNum++;
-}
-// Page 1
-// 03fvmay0zcoskwdf2sm0u94aw
-// 03fvqg4qxj39zecl43gnwwh04
-// Page 2
-// 03fvqg68ra0od9u1b8m0txgka
-// 03fvqhdcqsftfxrzb6xc8acjy
-// Page 3
-// 03fvqhdcqsftfxrzb6zq57rqs
-// 03fvqhdcqsftfxrzb71cxvk13
-// Page 4
-// 03fvqhdcqsftfxrzb74afpg6x
-// 03fvqhdcqsftfxrzb75rabbrt
-// Page 5
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb7a5g3hpm
-```
+> JS:
+>
+> ```ts
+> for await (const job of client.jobs().byStatus("scheduled").inPagesOf(2)) {
+>   console.log(job.id);
+> }
+> // 03fvmay0zcoskwdf2sm0u94aw
+> // 03fvqg4qxj39zecl43gnwwh04
+> // 03fvqg68ra0od9u1b8m0txgka
+> // 03fvqhdcqsftfxrzb6xc8acjy
+> // 03fvqhdcqsftfxrzb6zq57rqs
+> // 03fvqhdcqsftfxrzb71cxvk13
+> // 03fvqhdcqsftfxrzb74afpg6x
+> // 03fvqhdcqsftfxrzb75rabbrt
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> 
+> let pageNum = 1;
+> for await (const page of client.jobs()
+>     .byStatus("scheduled")
+>     .inPagesOf(2)
+>     .pages()) {
+>   console.log(`Page ${pageNum}`);
+>   for (const job of page.jobs) {
+>     console.log(job.id);
+>   }
+>   pageNum++;
+> }
+> // Page 1
+> // 03fvmay0zcoskwdf2sm0u94aw
+> // 03fvqg4qxj39zecl43gnwwh04
+> // Page 2
+> // 03fvqg68ra0od9u1b8m0txgka
+> // 03fvqhdcqsftfxrzb6xc8acjy
+> // Page 3
+> // 03fvqhdcqsftfxrzb6zq57rqs
+> // 03fvqhdcqsftfxrzb71cxvk13
+> // Page 4
+> // 03fvqhdcqsftfxrzb74afpg6x
+> // 03fvqhdcqsftfxrzb75rabbrt
+> // Page 5
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> ```
 
 ### `*[Symbol.asyncIterator]()` { #client.jobs-asyncIterator }
 
@@ -413,21 +437,23 @@ for await (const page of client.jobs()
 Iterates over each `Job` in the query result. Until this method, is called, the
 query is not yet executed.
 
-```ts
-for await (const job of client.joibs().byStatus("scheduled")) {
-  console.log(job.id);
-}
-// 03fvmay0zcoskwdf2sm0u94aw
-// 03fvqg4qxj39zecl43gnwwh04
-// 03fvqg68ra0od9u1b8m0txgka
-// 03fvqhdcqsftfxrzb6xc8acjy
-// 03fvqhdcqsftfxrzb6zq57rqs
-// 03fvqhdcqsftfxrzb71cxvk13
-// 03fvqhdcqsftfxrzb74afpg6x
-// 03fvqhdcqsftfxrzb75rabbrt
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb7a5g3hpm
-```
+> JS:
+>
+> ```ts
+> for await (const job of client.joibs().byStatus("scheduled")) {
+>   console.log(job.id);
+> }
+> // 03fvmay0zcoskwdf2sm0u94aw
+> // 03fvqg4qxj39zecl43gnwwh04
+> // 03fvqg68ra0od9u1b8m0txgka
+> // 03fvqhdcqsftfxrzb6xc8acjy
+> // 03fvqhdcqsftfxrzb6zq57rqs
+> // 03fvqhdcqsftfxrzb71cxvk13
+> // 03fvqhdcqsftfxrzb74afpg6x
+> // 03fvqhdcqsftfxrzb75rabbrt
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> ```
 
 ### `*pages()` { #client.jobs-pages }
 
@@ -437,34 +463,36 @@ Iterates over each `JobPage` in the query result.
 > When combined with `limit()`, `*pages()` stops at the page boundary but the
 > entire last page is returned even if the jobs it contains exceeds the limit.
 
-```ts
-let pageNum = 1;
-for await (const page of client.jobs()
-    .byStatus("scheduled")
-    .inPagesOf(2)
-    .pages()) {
-  console.log(`Page ${pageNum}`);
-  for (const job of page.jobs) {
-    console.log(job.id);
-  }
-  pageNum++;
-}
-// Page 1
-// 03fvmay0zcoskwdf2sm0u94aw
-// 03fvqg4qxj39zecl43gnwwh04
-// Page 2
-// 03fvqg68ra0od9u1b8m0txgka
-// 03fvqhdcqsftfxrzb6xc8acjy
-// Page 3
-// 03fvqhdcqsftfxrzb6zq57rqs
-// 03fvqhdcqsftfxrzb71cxvk13
-// Page 4
-// 03fvqhdcqsftfxrzb74afpg6x
-// 03fvqhdcqsftfxrzb75rabbrt
-// Page 5
-// 03fvqhdcqsftfxrzb78any8s1
-// 03fvqhdcqsftfxrzb7a5g3hpm
-```
+> JS:
+>
+> ```ts
+> let pageNum = 1;
+> for await (const page of client.jobs()
+>     .byStatus("scheduled")
+>     .inPagesOf(2)
+>     .pages()) {
+>   console.log(`Page ${pageNum}`);
+>   for (const job of page.jobs) {
+>     console.log(job.id);
+>   }
+>   pageNum++;
+> }
+> // Page 1
+> // 03fvmay0zcoskwdf2sm0u94aw
+> // 03fvqg4qxj39zecl43gnwwh04
+> // Page 2
+> // 03fvqg68ra0od9u1b8m0txgka
+> // 03fvqhdcqsftfxrzb6xc8acjy
+> // Page 3
+> // 03fvqhdcqsftfxrzb6zq57rqs
+> // 03fvqhdcqsftfxrzb71cxvk13
+> // Page 4
+> // 03fvqhdcqsftfxrzb74afpg6x
+> // 03fvqhdcqsftfxrzb75rabbrt
+> // Page 5
+> // 03fvqhdcqsftfxrzb78any8s1
+> // 03fvqhdcqsftfxrzb7a5g3hpm
+> ```
 
 ### `deleteAll()` { #client.jobs-deleteAll }
 
@@ -478,25 +506,27 @@ otherwise all jobs are deleted in a single transaction.
 This method also combines safely with `limit()` in order to explicitly prevent
 deleting more than a specified number of jobs (implies batch-wise deletion).
 
-```ts
-await client.jobs().byQueue("analytics").count();
-// 90
-
-await client.jobs().byQueue("analytics").deleteAll();
-// 90
-
-await client.jobs().byQueue("analytics").count();
-// 0
-
-await client.joibs().byQueue("comms").count();
-// 3538
-
-await client.jobs().byQueue("comms").inPagesOf(20).limit(30).order("desc").deleteAll();
-// 30
-
-await client.jobs().byQueue("comms").count();
-// 3528
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byQueue("analytics").count();
+> // 90
+> 
+> await client.jobs().byQueue("analytics").deleteAll();
+> // 90
+> 
+> await client.jobs().byQueue("analytics").count();
+> // 0
+> 
+> await client.joibs().byQueue("comms").count();
+> // 3538
+> 
+> await client.jobs().byQueue("comms").inPagesOf(20).limit(30).order("desc").deleteAll();
+> // 30
+> 
+> await client.jobs().byQueue("comms").count();
+> // 3528
+> ```
 
 ### `updateAll()` { #client.jobs-updateAll }
 
@@ -530,61 +560,67 @@ otherwise all jobs are updated in a single transaction.
 This method also combines safely with `limit()` in order to explicitly prevent
 updating more than a specified number of jobs (implies batch-wise update).
 
-```ts
-await client.jobs().byQueue("default").count();
-// 15491
-
-await client.jobs().byQueue("analytics").count();
-// 90
-
-await client.jobs().byQueue("analytics").updateAll({queue: "default"});
-// 90
-
-await client.jobs().byQueue("default").count();
-// 15581
-
-await client.jobs().byQueue("analytics").count();
-// 0
-
-await client.jobs().byQueue("payments").byStatus("scheduled").count();
-// 3
-
-await client.jobs().byQueue("payments").byStatus("scheduled").updateAll({readyAt: null});
-// 3
-
-await client.jobs().byQueue("payments").byStatus("scheduled").count();
-// 0
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byQueue("default").count();
+> // 15491
+> 
+> await client.jobs().byQueue("analytics").count();
+> // 90
+> 
+> await client.jobs().byQueue("analytics").updateAll({queue: "default"});
+> // 90
+> 
+> await client.jobs().byQueue("default").count();
+> // 15581
+> 
+> await client.jobs().byQueue("analytics").count();
+> // 0
+> 
+> await client.jobs().byQueue("payments").byStatus("scheduled").count();
+> // 3
+> 
+> await client.jobs().byQueue("payments").byStatus("scheduled").updateAll({readyAt: null});
+> // 3
+> 
+> await client.jobs().byQueue("payments").byStatus("scheduled").count();
+> // 0
+> ```
 
 ### `deleteOne()` { #client.jobs-deleteOne }
 
 Deletes at most the first matching result from the query.
 
-```ts
-await client.jobs().byQueue("payments").count();
-// 881
-
-await client.jobs().byQueue("payments").order("desc").deleteOne();
-// 1
-
-await client.jobs().byQueue("payments").count();
-// 880
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byQueue("payments").count();
+> // 881
+> 
+> await client.jobs().byQueue("payments").order("desc").deleteOne();
+> // 1
+> 
+> await client.jobs().byQueue("payments").count();
+> // 880
+> ```
 
 ### `updateOne()` { #client.jobs-updateOne }
 
 Updates at most the first matching result from the query.
 
-```ts
-await client.jobs().byQueue("comms").byStatus("scheduled").count();
-// 2
-
-await client.jobs().byQueue("comms").byStatus("scheduled").updateOne({readyAt: null});
-// 1
-
-await client.jobs().byQueue("comms").byStatus("scheduled").count();
-// 1
-```
+> JS:
+>
+> ```ts
+> await client.jobs().byQueue("comms").byStatus("scheduled").count();
+> // 2
+> 
+> await client.jobs().byQueue("comms").byStatus("scheduled").updateOne({readyAt: null});
+> // 1
+> 
+> await client.jobs().byQueue("comms").byStatus("scheduled").count();
+> // 1
+> ```
 
 ## `Job` Resource Helpers
 
@@ -605,38 +641,42 @@ The following methods allow deleting or updating the job's properties:
 Iterates over the errors on this job, either in reverse or ascending order.
 This can also be done in pages.
 
-```ts
-const job = await client.jobs().byId("03fvqhdcqsftfxrzb7m9owqsf").first();
-for await (const err of job.errors().inPagesOf(20).order("desc")) {
-  console.log(`Attempt: ${err.attempt}, Message: ${err.message}`);
-}
-// Attempt: 2, Message: Something went wrong
-// Attempt: 1, Message: Something went wrong
-```
+> JS:
+>
+> ```ts
+> const job = await client.jobs().byId("03fvqhdcqsftfxrzb7m9owqsf").first();
+> for await (const err of job.errors().inPagesOf(20).order("desc")) {
+>   console.log(`Attempt: ${err.attempt}, Message: ${err.message}`);
+> }
+> // Attempt: 2, Message: Something went wrong
+> // Attempt: 1, Message: Something went wrong
+> ```
 
 ### `delete()`
 
 Permanently deletes this job from the server. Returns `undefined` on success.
 Rejects on failure (e.g. 404 - job not found).
 
-```ts
-const job = await client.jobs().byQueue("comms").first();
-
-job.id
-// 03fvqhdcqsftfxrzb7hekw4if
-
-await client.jobs().byId("03fvqhdcqsftfxrzb7hekw4if").count();
-// 1
-
-await job.delete();
-// undefined
-
-await client.jobs().byId("03fvqhdcqsftfxrzb7hekw4if").count();
-// 0
-
-await job.delete();
-//! job not found (NotFoundError)
-```
+> JS:
+>
+> ```ts
+> const job = await client.jobs().byQueue("comms").first();
+> 
+> job.id
+> // 03fvqhdcqsftfxrzb7hekw4if
+> 
+> await client.jobs().byId("03fvqhdcqsftfxrzb7hekw4if").count();
+> // 1
+> 
+> await job.delete();
+> // undefined
+> 
+> await client.jobs().byId("03fvqhdcqsftfxrzb7hekw4if").count();
+> // 0
+> 
+> await job.delete();
+> //! job not found (NotFoundError)
+> ```
 
 ### `update()`
 
@@ -645,24 +685,26 @@ success. Rejects with a `ClientError` on failure.
 
 Jobs in the `completed` or `dead` statuses are immutable and cannot be updated.
 
-```ts
-const job = await client.jobs().byQueue("comms").first();
-
-job.id
-// 03fvqhdcqsftfxrzb7nn5h57r
-
-for await (const job of client.jobs().byId("03fvqhdcqsftfxrzb7nn5h57r")) {
-  console.log(job.queue);
-}
-// comms
-
-await job.update({queue: "default"});
-
-for await (const job of client.jobs().byId("03fvqhdcqsftfxrzb7nn5h57r")) {
-  console.log(job.queue);
-}
-// default
-```
+> JS:
+>
+> ```ts
+> const job = await client.jobs().byQueue("comms").first();
+> 
+> job.id
+> // 03fvqhdcqsftfxrzb7nn5h57r
+> 
+> for await (const job of client.jobs().byId("03fvqhdcqsftfxrzb7nn5h57r")) {
+>   console.log(job.queue);
+> }
+> // comms
+> 
+> await job.update({queue: "default"});
+> 
+> for await (const job of client.jobs().byId("03fvqhdcqsftfxrzb7nn5h57r")) {
+>   console.log(job.queue);
+> }
+> // default
+> ```
 
 ## `JobPage` Resource Helpers
 
@@ -688,14 +730,16 @@ Delete all jobs on the current page by their IDs.
 The example here deletes all jobs on the first 5 pages where the queue is
 `example`.
 
-```ts
-let pageNum = 1;
-for await (const page of client.jobs().byQueue("example").pages()) {
-  if (pageNum > 5) break;
-  await page.deleteAll();
-  pageNum++;
-}
-```
+> JS:
+>
+> ```ts
+> let pageNum = 1;
+> for await (const page of client.jobs().byQueue("example").pages()) {
+>   if (pageNum > 5) break;
+>   await page.deleteAll();
+>   pageNum++;
+> }
+> ```
 
 ### `updateAll()` { #jobpage-resource-updateAll }
 
@@ -710,11 +754,13 @@ Update all jobs on the current page by their IDs.
 The example here update all jobs on the first 2 pages where the queue is
 `example`.
 
-```ts
-let pageNum = 1;
-for await (const page of client.jobs().byQueue("example").pages()) {
-  if (pageNum > 5) break;
-  await page.updateAll({queue: "other"});
-  pageNum++;
-}
-```
+> JS:
+>
+> ```ts
+> let pageNum = 1;
+> for await (const page of client.jobs().byQueue("example").pages()) {
+>   if (pageNum > 5) break;
+>   await page.updateAll({queue: "other"});
+>   pageNum++;
+> }
+> ```

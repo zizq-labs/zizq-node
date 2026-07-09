@@ -9,25 +9,27 @@ handler function, and reports sucess of failure (ack/nack) to the server. A
 single `Worker` runs a specified number of concurrent handlers on a single
 Node event loop.
 
-```ts
-import { Client, Worker } from "@zizq-labs/zizq";
-
-const client = new Client({ url: "http://localhost:7890" });
-
-const worker = new Worker({
-  client,
-  concurrency: 25,
-  queues: ["emails"],
-  handler: async (job) => {
-    // your application logic here
-  },
-});
-
-process.on("SIGINT",  () => worker.stop());
-process.on("SIGTERM", () => worker.stop());
-
-await worker.run();  // blocks until stopped
-```
+> JS:
+>
+> ```ts
+> import { Client, Worker } from "@zizq-labs/zizq";
+> 
+> const client = new Client({ url: "http://localhost:7890" });
+> 
+> const worker = new Worker({
+>   client,
+>   concurrency: 25,
+>   queues: ["emails"],
+>   handler: async (job) => {
+>     // your application logic here
+>   },
+> });
+> 
+> process.on("SIGINT",  () => worker.stop());
+> process.on("SIGTERM", () => worker.stop());
+> 
+> await worker.run();  // blocks until stopped
+> ```
 
 ## Specifying the number of concurrent jobs
 
@@ -35,13 +37,15 @@ Pass `concurrency` to the `Worker` to specify how many jobs are permitted to
 run concurrently. The default value is `1`, which means that worker is purely
 sequential.
 
-```ts
-const worker = new Worker({
-  client,
-  concurrency: 100,
-  handler,
-});
-```
+> JS:
+>
+> ```ts
+> const worker = new Worker({
+>   client,
+>   concurrency: 100,
+>   handler,
+> });
+> ```
 
 ## Specifying which queues to process
 
@@ -52,13 +56,15 @@ into existence when jobs are enqueued to them.
 An empty array means _all queues_. The default value when not specified is `[]`
 (all queues).
 
-```ts
-const worker = new Worker({
-  client,
-  queues: ["emails", "invoicing"],
-  handler,
-});
-```
+> JS:
+>
+> ```ts
+> const worker = new Worker({
+>   client,
+>   queues: ["emails", "invoicing"],
+>   handler,
+> });
+> ```
 
 ### Specifying a prefetch limit
 
@@ -73,14 +79,16 @@ not to set this value lower than `concurrency` as doing so will act as a
 concurrency limiter (there will not be enough jobs available to meet the
 desired concurrency).
 
-```ts
-const worker = new Worker({
-  client,
-  concurrency: 50,
-  prefetch: 60, // 50 jobs being worked, 10 ready to go
-  handler,
-});
-```
+> JS:
+>
+> ```ts
+> const worker = new Worker({
+>   client,
+>   concurrency: 50,
+>   prefetch: 60, // 50 jobs being worked, 10 ready to go
+>   handler,
+> });
+> ```
 
 ### Specifying a logger instance
 
@@ -97,12 +105,14 @@ drained.
 If you want a deadline on graceful shutdown, escalate to `worker.kill()`
 after a timeout:
 
-```ts
-process.on("SIGINT", () => {
-  worker.stop();
-  setTimeout(() => worker.kill(), 30_000);
-});
-```
+> JS:
+>
+> ```ts
+> process.on("SIGINT", () => {
+>   worker.stop();
+>   setTimeout(() => worker.kill(), 30_000);
+> });
+> ```
 
 `kill()` closes the stream immediately and skips the drain + flush. Any
 in-flight job handlers that are already running continue to completion —
