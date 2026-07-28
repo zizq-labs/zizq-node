@@ -18,7 +18,13 @@ import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
 // Import from the installed package, NOT from source.
-import { Client, Worker, NotFoundError, ClientError } from "@zizq-labs/zizq";
+import {
+  Client,
+  Worker,
+  NotFoundError,
+  ClientError,
+  batchConfig,
+} from "@zizq-labs/zizq";
 
 const noopLogger = {
   info() {},
@@ -422,6 +428,234 @@ describe("integration", { concurrency: 1 }, () => {
         return;
       }
       throw err;
+    }
+  });
+
+  // --- Batched jobs (Pro) ---
+
+  it("batched: second enqueue folds into first and merges payload", async () => {
+    try {
+      const r1 = await client.enqueue({
+        type: "audit.events",
+        queue: "batched-integration",
+        payload: [{ id: 1 }],
+        batch: batchConfig(100),
+      });
+      const r2 = await client.enqueue({
+        type: "audit.events",
+        queue: "batched-integration",
+        payload: [{ id: 2 }, { id: 3 }],
+        batch: batchConfig(100),
+      });
+
+      assert.equal(r1.folded, false);
+      assert.equal(r2.folded, true);
+      assert.equal(r2.id, r1.id, "fold reuses the batch's job id");
+
+      const fetched = await client.getJob(r1.id);
+      assert.deepEqual(fetched.payload, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+      assert.ok(fetched.batch, "batch config is visible on job reads");
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      throw err;
+    }
+  });
+
+  it("batched: different non-batch args don't fold", async () => {
+    try {
+      const r1 = await client.enqueue({
+        type: "push",
+        queue: "batched-integration",
+        payload: { deviceIds: ["a"], platform: "apple" },
+        batch: batchConfig(100, ".deviceIds"),
+      });
+      const r2 = await client.enqueue({
+        type: "push",
+        queue: "batched-integration",
+        payload: { deviceIds: ["b"], platform: "android" },
+        batch: batchConfig(100, ".deviceIds"),
+      });
+
+      assert.equal(r1.folded, false);
+      assert.equal(r2.folded, false);
+      assert.notEqual(r1.id, r2.id);
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      throw err;
+    }
+  });
+
+  it("batched: bulk intra-fold within one call", async () => {
+    try {
+      const results = await client.enqueueBulk([
+        {
+          type: "audit.events",
+          queue: "batched-integration",
+          payload: [{ id: 1 }],
+          batch: batchConfig(100),
+        },
+        {
+          type: "audit.events",
+          queue: "batched-integration",
+          payload: [{ id: 2 }],
+          batch: batchConfig(100),
+        },
+        {
+          type: "audit.events",
+          queue: "batched-integration",
+          payload: [{ id: 3 }],
+          batch: batchConfig(100),
+        },
+      ]);
+
+      assert.equal(results[0].folded, false);
+      assert.equal(results[1].folded, true);
+      assert.equal(results[2].folded, true);
+      assert.equal(results[1].id, results[0].id);
+      assert.equal(results[2].id, results[0].id);
+
+      const fetched = await client.getJob(results[0].id);
+      assert.deepEqual(fetched.payload, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      throw err;
+    }
+  });
+
+  it("batched: dedup flag collapses overlapping items", async () => {
+    try {
+      await client.enqueue({
+        type: "audit.events",
+        queue: "batched-integration",
+        payload: [{ id: 1 }, { id: 2 }],
+        batch: batchConfig(100, ".", { dedup: true }),
+      });
+      const r = await client.enqueue({
+        type: "audit.events",
+        queue: "batched-integration",
+        payload: [{ id: 2 }, { id: 3 }],
+        batch: batchConfig(100, ".", { dedup: true }),
+      });
+      assert.equal(r.folded, true);
+
+      const fetched = await client.getJob(r.id);
+      // `unique` in jq sorts as a side effect; assert on the sorted set.
+      const ids = fetched.payload.map((h) => h.id).sort((a, b) => a - b);
+      assert.deepEqual(ids, [1, 2, 3]);
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      throw err;
+    }
+  });
+
+  it("batched: worker receives the merged payload", async () => {
+    try {
+      await client.enqueue({
+        type: "batched_worker",
+        queue: "batched-worker-integration",
+        payload: [{ id: 1 }],
+        batch: batchConfig(100),
+      });
+      await client.enqueue({
+        type: "batched_worker",
+        queue: "batched-worker-integration",
+        payload: [{ id: 2 }],
+        batch: batchConfig(100),
+      });
+      await client.enqueue({
+        type: "batched_worker",
+        queue: "batched-worker-integration",
+        payload: [{ id: 3 }],
+        batch: batchConfig(100),
+      });
+
+      let received = null;
+      const worker = new Worker({
+        client,
+        queues: ["batched-worker-integration"],
+        concurrency: 1,
+        logger: noopLogger,
+        handler: async (job) => {
+          received = job.payload;
+          worker.stop();
+        },
+      });
+
+      const timeout = setTimeout(() => worker.kill(), 10_000);
+      await worker.run();
+      clearTimeout(timeout);
+
+      assert.deepEqual(received, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      throw err;
+    }
+  });
+
+  it("batched: batch.key can be a function derived from the payload", async () => {
+    try {
+      const r1 = await client.enqueue({
+        type: "push",
+        queue: "batched-integration",
+        payload: { deviceIds: ["a"], tenantId: 42 },
+        batch: {
+          ...batchConfig(100, ".deviceIds"),
+          key: (input) => `push:tenant-${input.payload.tenantId}`,
+        },
+      });
+      const r2 = await client.enqueue({
+        type: "push",
+        queue: "batched-integration",
+        payload: { deviceIds: ["b"], tenantId: 42 },
+        batch: {
+          ...batchConfig(100, ".deviceIds"),
+          key: (input) => `push:tenant-${input.payload.tenantId}`,
+        },
+      });
+
+      assert.equal(r1.folded, false);
+      assert.equal(r2.folded, true);
+      assert.equal(r1.batch.key, "push:tenant-42");
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      throw err;
+    }
+  });
+
+  it("batched: uniqueKey + batch is rejected with 400", async () => {
+    try {
+      await client.enqueue({
+        type: "push",
+        queue: "batched-integration",
+        payload: [{ id: 1 }],
+        uniqueKey: "some-key",
+        batch: batchConfig(100),
+      });
+      assert.fail("expected client to reject unique + batch combination");
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      assert.ok(err instanceof ClientError, `expected ClientError, got: ${err}`);
+      assert.equal(err.status, 400);
+    }
+  });
+
+  it("batched: invalid jq expression is rejected with 422", async () => {
+    try {
+      await client.enqueue({
+        type: "push",
+        queue: "batched-integration",
+        payload: [{ id: 1 }],
+        batch: {
+          key: "bad-expr",
+          when: ".[*]", // syntactically invalid
+          fold: "$existing + $new",
+        },
+      });
+      assert.fail("expected client to reject the invalid expression");
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) return;
+      assert.ok(err instanceof ClientError, `expected ClientError, got: ${err}`);
+      assert.equal(err.status, 422);
     }
   });
 });

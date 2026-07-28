@@ -62,6 +62,19 @@ function computeUniqueKey(
   return uniqueKey;
 }
 
+// Resolve a value that may be either a literal or a function derived
+// from the enqueue input. Used for both `uniqueKey` and `batch.key`
+// on `EnqueueInput` so `payloadHasher(...)` and other userland
+// factories can produce a function that receives the input at call
+// time.
+function resolveKey(
+  value: string | ((input: EnqueueInput) => string) | undefined,
+  input: EnqueueInput,
+): string | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "function" ? value(input) : value;
+}
+
 /**
  * Resolve an EnqueueInput into a low-level EnqueueOptions.
  *
@@ -94,13 +107,21 @@ export function resolveInput(input: EnqueueInput): EnqueueOptions {
   }
 
   const uniqueKey =
-    input.uniqueKey ??
+    resolveKey(input.uniqueKey, input) ??
     (typeof input.type === "function"
       ? computeUniqueKey(input.type, input.payload)
       : undefined);
 
   const uniqueWhile =
     input.uniqueWhile ?? defaults?.uniqueWhile;
+
+  const batch = input.batch
+    ? {
+        key: resolveKey(input.batch.key, input)!,
+        when: input.batch.when,
+        fold: input.batch.fold,
+      }
+    : undefined;
 
   const opts: EnqueueOptions = {
     type: jobType,
@@ -113,6 +134,7 @@ export function resolveInput(input: EnqueueInput): EnqueueOptions {
     retention: input.retention,
     uniqueKey,
     uniqueWhile: uniqueKey ? uniqueWhile : undefined,
+    batch,
   };
 
   // Apply the transform hook (if any). Transforms can change the options based

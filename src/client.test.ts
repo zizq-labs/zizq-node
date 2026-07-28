@@ -234,6 +234,122 @@ describe("Client", () => {
       await ctx.client.enqueue({ type: handler, payload: {} });
       assert.equal(captured.priority, 999);
     });
+
+    it("sends batch config on the wire", async () => {
+      let captured: any;
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body: string) => {
+            captured = JSON.parse(body);
+            return true;
+          },
+        })
+        .reply(201, { ...jobResponse, folded: false }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const job = await ctx.client.enqueue({
+        type: "push",
+        queue: "q",
+        payload: [1],
+        batch: {
+          key: "push:apple",
+          when: "true",
+          fold: "$existing + $new",
+        },
+      });
+
+      assert.deepEqual(captured.batch, {
+        key: "push:apple",
+        when: "true",
+        fold: "$existing + $new",
+      });
+      assert.equal(job.folded, false);
+    });
+
+    it("resolves batch.key when it is a function", async () => {
+      let captured: any;
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body: string) => {
+            captured = JSON.parse(body);
+            return true;
+          },
+        })
+        .reply(201, jobResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      await ctx.client.enqueue({
+        type: "push",
+        queue: "q",
+        payload: { tenantId: 42, notifications: [1] },
+        batch: {
+          key: (input) => `push:${(input.payload as any).tenantId}`,
+          when: "true",
+          fold: "$existing | .notifications += $new.notifications",
+        },
+      });
+
+      assert.equal(captured.batch.key, "push:42");
+    });
+
+    it("resolves uniqueKey when it is a function taking input", async () => {
+      let captured: any;
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body: string) => {
+            captured = JSON.parse(body);
+            return true;
+          },
+        })
+        .reply(201, jobResponse, {
+          headers: { "content-type": "application/json" },
+        });
+
+      await ctx.client.enqueue({
+        type: "sendEmail",
+        queue: "q",
+        payload: { userId: 42 },
+        uniqueKey: (input) => `user-${(input.payload as any).userId}`,
+        uniqueWhile: "active",
+      });
+
+      assert.equal(captured.unique_key, "user-42");
+      assert.equal(captured.unique_while, "active");
+    });
+
+    it("exposes folded and batch on the returned Job", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs", method: "POST" })
+        .reply(200, {
+          ...jobResponse,
+          folded: true,
+          batch: { key: "k", when: "true", fold: "$existing + $new" },
+        }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const job = await ctx.client.enqueue({
+        type: "push",
+        queue: "q",
+        payload: [1],
+        batch: {
+          key: "k",
+          when: "true",
+          fold: "$existing + $new",
+        },
+      });
+
+      assert.equal(job.folded, true);
+      assert.deepEqual(job.batch, { key: "k", when: "true", fold: "$existing + $new" });
+    });
   });
 
   describe("enqueueBulk", () => {

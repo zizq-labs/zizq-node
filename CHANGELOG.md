@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.6.0
+
+- **Batched jobs** (Pro) — new `batch` field on the enqueue input for
+  server-side folding of successive enqueues into a single pending
+  job. The wire shape is `{key: string, when: string, fold: string}`
+  (jq predicate + jq reducer running with `$existing` and `$new`
+  bound to the current pending payload and the incoming payload
+  respectively). `batch.key` on the client accepts either a string or
+  a function `(input: EnqueueInput) => string`, resolved at enqueue
+  time so callers can derive keys dynamically from the payload.
+
+- **`batchConfig(limit, path?, opts?)`** — ergonomic helper returning
+  the `{key, when, fold}` shape with all three fields pre-filled from
+  a target jq path + limit. `path` defaults to `.` (whole payload is
+  the batch target, assumed to be an array). `opts.dedup: true`
+  appends `| unique`, `opts.sorted: true` appends `| sort`.
+  `batch.key` becomes `payloadHasher({except: [path]})` — same
+  non-batch args produce the same key so those enqueues fold
+  together. Spread + override to substitute a custom key:
+
+      await client.enqueue({
+        type: "push",
+        queue: "push",
+        payload: { deviceIds: [id], platform: "apple" },
+        batch: batchConfig(100, ".deviceIds"),
+      });
+
+  Path syntax is jq-compatible: `.`, `.foo`, `.foo.bar`, `.foo[0]`,
+  `.[0]`, `.["dotted.key"]`. Invalid paths throw at construction time.
+
+- **`payloadHasher(opts?)`** — first-class payload hasher, returns
+  `(input: EnqueueInput) => string`. `only` and `except` accept a jq
+  path or an array of them (single string is canonicalized).
+  Missing paths are silently skipped; `only` reconstructs the picked
+  subset preserving original nesting so the hash matches what a
+  natively-smaller payload would produce. Prefix defaults to
+  `${type}:${digest}`; `prefix: false` returns bare hex. Assignable
+  directly to `uniqueKey` on `client.enqueue({...})` inputs:
+
+      uniqueKey: payloadHasher({ only: [".userId", ".template"] })
+
+- **`Client.enqueue({uniqueKey: fn})`** — `EnqueueInput.uniqueKey`
+  now accepts a function `(input: EnqueueInput) => string` in
+  addition to the existing string literal. Resolved client-side at
+  enqueue time. The pre-existing `(fn, payload) => string` shape used
+  by `zizqOptions.uniqueKey` on job functions continues to work
+  unchanged.
+
+- **`Job.folded`** and **`Job.batch`** on returned resources —
+  `folded: true` on enqueue responses indicates the request was
+  merged into an existing pending job; `batch` exposes the stored
+  `{key, when, fold}` config on any job read so debugging "why isn't
+  my batch behaving as I expect?" is a straightforward inspection.
+
+- **Internal cleanup** — `uniqueKey(...fields)` now delegates to
+  `payloadHasher({only: fields.map(f => '.' + f)})` behind a
+  `(fn, payload)` shim, producing byte-identical hashes to the
+  previous implementation. `hashInto` moved from `unique-key.ts` into
+  `payload-hasher.ts` (private) so the two modules form a one-way
+  dependency instead of a cycle.
+
+- Requires Zizq server **0.6.0** or later.
+
 ## 0.5.0
 
 - Added three new range filters on `Client.listJobs`,

@@ -1520,6 +1520,7 @@ function enqueueToApi(opts: EnqueueOptions): Record<string, unknown> {
     retention: opts.retention && retentionToApi(opts.retention),
     unique_key: opts.uniqueKey,
     unique_while: opts.uniqueWhile,
+    batch: opts.batch,
   });
 }
 
@@ -1587,6 +1588,8 @@ function jobFromApi(raw: unknown): JobData {
     uniqueKey: r.unique_key,
     uniqueWhile: r.unique_while,
     duplicate: r.duplicate,
+    folded: r.folded,
+    batch: r.batch,
   }) as unknown as JobData;
 }
 
@@ -1683,6 +1686,7 @@ function cronJobToApi(job: EnqueueOptions): Record<string, unknown> {
     retention: job.retention && retentionToApi(job.retention),
     unique_key: job.uniqueKey,
     unique_while: job.uniqueWhile,
+    batch: job.batch,
   });
 }
 
