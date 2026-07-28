@@ -21,6 +21,32 @@ export type SortDirection = "asc" | "desc";
 /** Uniqueness scope for deduplication. */
 export type UniqueScope = "queued" | "active" | "exists";
 
+/**
+ * Batching configuration for folded jobs.
+ *
+ * When present on an enqueue, subsequent enqueues that share `key` may
+ * be folded into the same pending job's payload. `when` (jq predicate)
+ * decides whether to fold; `fold` (jq reducer) produces the merged
+ * payload. Both run with `$existing` bound to the current pending
+ * payload and `$new` bound to the incoming one.
+ *
+ * Requires a pro license on the server.
+ */
+export interface BatchConfig {
+  /** Identifies the batch. Only one pending batch per key at a time. */
+  key: string;
+
+  /**
+   * jq predicate deciding whether to fold. Truthy → merge into the
+   * existing batch. Falsy → seal the existing batch and start a fresh
+   * one from this enqueue.
+   */
+  when: string;
+
+  /** jq expression producing the merged payload when `when` returns true. */
+  fold: string;
+}
+
 /** Serialisation format for client-server communication. */
 export type Format = "json" | "msgpack";
 
@@ -122,6 +148,13 @@ export interface EnqueueOptions {
    * Uniqueness scope. Only valid when `uniqueKey` is set.
    */
   uniqueWhile?: UniqueScope;
+
+  /**
+   * Batching configuration for folded jobs.
+   *
+   * Requires a pro license on the server.
+   */
+  batch?: BatchConfig;
 }
 
 /** Options for reporting a job failure. */
@@ -447,11 +480,32 @@ export interface EnqueueInput {
    *
    * The key is global across all queues and job types. Prefix with the job
    * type to make it unique per job type.
+   *
+   * Accepts either a literal string or a function that derives the key
+   * from this enqueue input at call time. The function form is what
+   * `payloadHasher(...)` returns.
    */
-  uniqueKey?: string;
+  uniqueKey?: string | ((input: EnqueueInput) => string);
 
   /** Uniqueness scope. Only valid when `uniqueKey` is set. */
   uniqueWhile?: UniqueScope;
+
+  /**
+   * Batching configuration for folded jobs.
+   *
+   * `key` can be either a literal string or a function that derives the
+   * key from this enqueue input at call time. `batchConfig(...)`
+   * returns a value shaped like this with `key` as a function; users
+   * can also spread its result and override `key` with a custom
+   * derivation.
+   *
+   * Requires a pro license on the server.
+   */
+  batch?: {
+    key: string | ((input: EnqueueInput) => string);
+    when: string;
+    fold: string;
+  };
 }
 
 

@@ -15,6 +15,7 @@ import type {
   JobStatus,
   UniqueScope,
   BackoffConfig,
+  BatchConfig,
   RetentionConfig,
   EnqueueOptions,
   FailureOptions,
@@ -82,6 +83,18 @@ export interface JobData {
 
   /** True if this job was returned as a duplicate (enqueue responses only). */
   duplicate?: boolean;
+
+  /**
+   * True if this enqueue was folded into an existing pending batched
+   * job (enqueue responses only).
+   */
+  folded?: boolean;
+
+  /**
+   * Batching configuration stored on this job. Present only for
+   * batched jobs.
+   */
+  batch?: BatchConfig;
 }
 
 /**
@@ -158,6 +171,20 @@ export class Job {
   /** True if this job was returned as a duplicate (enqueue responses only). */
   readonly duplicate?: boolean;
 
+  /**
+   * True if this enqueue was folded into an existing pending batched
+   * job (enqueue responses only).
+   */
+  readonly folded?: boolean;
+
+  /**
+   * Batching configuration stored on this job. Present only for
+   * batched jobs. The first enqueue's `when`/`fold` are the ones
+   * that apply for the life of the batch, so this is the source of
+   * truth for what's being evaluated on subsequent folds.
+   */
+  readonly batch?: BatchConfig;
+
   /** @internal */
   private client: Client;
 
@@ -182,6 +209,8 @@ export class Job {
     this.uniqueKey = data.uniqueKey;
     this.uniqueWhile = data.uniqueWhile;
     this.duplicate = data.duplicate;
+    this.folded = data.folded;
+    this.batch = data.batch;
   }
 
   /**
@@ -255,6 +284,8 @@ export class Job {
       uniqueKey: this.uniqueKey,
       uniqueWhile: this.uniqueWhile,
       duplicate: this.duplicate,
+      folded: this.folded,
+      batch: this.batch,
     };
   }
 }
