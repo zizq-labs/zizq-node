@@ -79,3 +79,6 @@ export { uniqueKey } from "./unique-key.ts";
 
 export { payloadHasher } from "./payload-hasher.ts";
 export type { PayloadHasherOptions } from "./payload-hasher.ts";
+
+export { batchConfig } from "./batch-config.ts";
+export type { BatchConfigOptions } from "./batch-config.ts";
