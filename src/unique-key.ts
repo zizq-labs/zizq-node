@@ -10,8 +10,6 @@
  * @module
  */
 
-import { type Hash } from "node:crypto";
-
 import type { JobFunction } from "./handler.ts";
 import { payloadHasher } from "./payload-hasher.ts";
 
@@ -88,48 +86,4 @@ export function uniqueKey(
 
     return hasher({ type: fn, queue: "", payload });
   };
-}
-
-/**
- * Stream a JSON-compatible value into a crypto hash as canonical JSON:
- * object keys sorted, arrays in order, primitives emitted via `JSON.stringify`.
- *
- * The resulting byte stream is unambiguous because strings are quoted,
- * `null`/`true`/`false` are fixed tokens, and commas separate items within
- * containers (so `[1,2]` and `[12]` hash differently).
- *
- * The input must already be normalised JSON data, as from
- * `JSON.parse(JSON.stringify(x))`.
- */
-export function hashInto(hash: Hash, value: unknown): void {
-  // Bare number, string, boolean or null. Use JSON repr.
-  if (value === null || typeof value !== "object") {
-    hash.update(JSON.stringify(value));
-    return;
-  }
-
-  // Arrays hash in the original order, with "[" and "]" markers.
-  // We don't worry about the trailing comma; we just need a stable digest.
-  if (Array.isArray(value)) {
-    hash.update("[");
-    for (const item of value) {
-      hashInto(hash, item);
-      hash.update(",");
-    }
-    hash.update("]");
-    return;
-  }
-
-  // Objects hash in key-sorted order, with "{" and "}" markers.
-  // We don't worry about the trailing comma; we just need a stable digest.
-  hash.update("{");
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  for (const key of keys) {
-    hash.update(JSON.stringify(key));
-    hash.update(":");
-    hashInto(hash, obj[key]);
-    hash.update(",");
-  }
-  hash.update("}");
 }
