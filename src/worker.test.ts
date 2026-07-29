@@ -111,12 +111,6 @@ describe("Worker", () => {
   it("reports failure when a handler throws", async () => {
     let worker: Worker;
 
-    const failingJob: JobFunction = async () => {
-      worker.stop();
-      throw new Error("boom");
-    };
-    failingJob.zizqOptions = { queue: "q" };
-
     const job = {
       id: "j3",
       type: "failingJob",
@@ -145,7 +139,10 @@ describe("Worker", () => {
 
     worker = new Worker({
       client: ctx.client,
-      handler: buildHandler([failingJob]),
+      handler: async () => {
+        worker.stop();
+        throw new Error("boom");
+      },
       logger: { info() {}, error() {} },
     });
 
