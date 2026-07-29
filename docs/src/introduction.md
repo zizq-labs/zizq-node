@@ -33,7 +33,8 @@ The Node client has two main parts:
 There is no _job class_ abstraction. The handler function is a simple `async`
 function that accepts a job object and executes it as required. The client does
 however provide a convenience through which such a handler can be composed from
-a set of `async` functions that just take the `payload` (JSON) and process it.
+a set of `async` route handlers that just take the `payload` (JSON) and process
+it.
 
 ## Example
 
@@ -42,7 +43,7 @@ A minimal worker looks like this:
 > JS:
 >
 > ```ts
-> import { Client, Worker } from "@zizq-labs/zizq";
+> import { Client, Worker, Router } from "@zizq-labs/zizq";
 > 
 > const client = new Client({ url: "http://localhost:7890" });
 > 
@@ -50,10 +51,11 @@ A minimal worker looks like this:
 >   client,
 >   concurrency: 25,
 >   queues: ["emails"],
->   handler: async (job) => {
->     // your application logic here
->     console.log("processing", job.id, job.type, job.payload);
->   },
+>   handler: new Router()
+>     .route("send_email", async (payload) => {
+>       console.log("mailing", payload.to, payload.subject);
+>     })
+>     .build(),
 > });
 > 
 > process.on("SIGINT",  () => worker.stop());
@@ -61,6 +63,12 @@ A minimal worker looks like this:
 > 
 > await worker.run();  // blocks until stopped
 > ```
+
+The `Router` produces a [Handler Function](./handlers.md). The `Worker`
+dequeues jobs from the server and calls your handler function for each one. If
+the handler resolves successfully, the job is acknowledged. If the handler
+throws or rejects, the failure is reported to the server, which will either
+back off and retry or kill the job if it has exceeded its retry limit.
 
 Enqueueing jobs is just as direct:
 
@@ -74,13 +82,6 @@ Enqueueing jobs is just as direct:
 > });
 > ```
 
-The `Worker` dequeues jobs from the server and calls your handler function
-for each one. If the handler resolves successfully, the job is acknowledged.
-If the handler throws or rejects, the failure is reported to the server,
-which will either back off and retry or kill the job if it has exceeded its
-retry limit.
-
-> [!TIP]
-> There is also a convenience through which jobs can be defined as individual
-> functions and composed into a single handler via `buildHandler()`. See
-> [Handler Functions](./handlers.md) for more details.
+When Zizq dispatches this job to a `Worker`, its handler uses the `type` of
+`"send_email"` to determine how to process the job, such as in the example
+above.

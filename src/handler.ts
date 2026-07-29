@@ -205,6 +205,8 @@ export interface JobFunction {
  *   functions resolve to the same type.
  */
 export function buildHandler(jobs: JobFunction[]): JobHandler {
+  warnBuildHandlerDeprecated();
+
   const seen = new Set<string>();
   const router = new Router();
 
@@ -223,4 +225,22 @@ export function buildHandler(jobs: JobFunction[]): JobHandler {
   }
 
   return router.build();
+}
+
+// --- Deprecation warnings ---
+
+let warnedBuildHandler = false;
+
+function warnBuildHandlerDeprecated(): void {
+  if (warnedBuildHandler) return;
+  warnedBuildHandler = true;
+  process.emitWarning(
+    "buildHandler and job functions are deprecated and will be removed in " +
+      "v1.0. Use Router directly (client.enqueue({type: '...', ...}) + a " +
+      "Router-based worker) instead.",
+    {
+      type: "DeprecationWarning",
+      code: "ZIZQ_JOB_FUNCTIONS_DEPRECATED",
+    },
+  );
 }
