@@ -7,4 +7,5 @@
 - [Running Workers](./workers.md)
 - [Cron Scheduling](./cron.md)
 - [Unique Jobs](./unique-jobs.md)
+- [Batched Jobs](./batched-jobs.md)
 - [Querying & Managing Jobs](./querying-jobs.md)
