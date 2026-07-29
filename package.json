@@ -34,7 +34,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types 'src/**/*.test.ts'"
+    "test": "node --test --experimental-strip-types --import ./src/test-setup.ts 'src/**/*.test.ts'"
   },
   "engines": {
     "node": ">=22.19"

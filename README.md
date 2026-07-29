@@ -12,7 +12,7 @@ This is the official Zizq client library for Node.js, written in TypeScript.
 ## Features
 
 * Concurrent async-based worker
-* Plain handler functions, or composable Job Functions with attached defaults
+* Simple handler functions, or composable `Router`
 * Enqueue and process jobs from one language to another
 * Arbitrary named queues
 * Granular job priorities
@@ -21,7 +21,8 @@ This is the official Zizq client library for Node.js, written in TypeScript.
 * Configurable job retention policies
 * Recurring jobs (cron)
 * Job introspection and management APIs, with support for `jq` query filters
-* Unique jobs
+* Unique jobs (de-duplicated)
+* Batched jobs (folded/merged)
 
 ## Installation
 
@@ -106,7 +107,7 @@ await client.enqueueBulk([
 
 ### Defining handlers
 
-A handler is an `async` function that accepts a `job` and either resolves
+A handler is any `async` function that accepts a `job` and either resolves
 (the worker acks it as successful) or throws (the worker reports a failure
 and the server retries per the backoff policy). The simplest version is a
 `switch` on `job.type`:
@@ -124,38 +125,9 @@ async function handler(job) {
 }
 ```
 
-For a more composable style, the client ships `buildHandler` — pass in your
-job functions and you get back a handler that dispatches on the function
-name. Each function can also carry `zizqOptions` with its own defaults
-(queue, priority, backoff, retention, uniqueness), so enqueuing later only
-needs the payload:
-
-```ts
-import { buildHandler } from "@zizq-labs/zizq";
-
-async function sendEmail(payload, job) {
-  // ...
-}
-sendEmail.zizqOptions = { queue: "emails", priority: 100 };
-
-async function generateReport(payload) {
-  // ...
-}
-generateReport.zizqOptions = { queue: "reports" };
-
-const handler = buildHandler([sendEmail, generateReport]);
-
-// Job functions can be enqueued directly — the queue and other defaults
-// come from the function's zizqOptions.
-await client.enqueue({
-  type: sendEmail,
-  payload: { userId: 42, template: "welcome" },
-});
-```
-
-For cross-language workflows or when you want explicit `type -> handler`
-registration with optional fallback, use `Router`. Routes match by job
-type (a string the producer agrees on with the consumer), and an
+For a more composable style, the client ships a `Router` that implements
+handler registration for named job types with optional fallback. Routes match
+by job type (a string the producer agrees on with the consumer), and an
 optional `fallback` catches anything unmatched:
 
 ```ts
@@ -220,8 +192,6 @@ replacing, and removing entries as the definition changes. Cron requires
 a Pro license on the server.
 
 ```ts
-import { sendDailyDigest } from "./handlers";
-
 await client.cron("maintenance").register({
   timezone: "Europe/London",
   entries: [
@@ -235,7 +205,7 @@ await client.cron("maintenance").register({
     {
       name: "daily_digest",
       expression: "0 9 * * *",
-      type: sendDailyDigest, // Job Functions are accepted directly
+      type: "send_daily_digest",
       payload: {},
     },
   ],

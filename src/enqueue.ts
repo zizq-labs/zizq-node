@@ -96,6 +96,7 @@ export function resolveInput(input: EnqueueInput): EnqueueOptions {
         "Job function must have a name or zizqOptions.type"
       );
     }
+    warnJobFunctionDeprecated(input.type, jobType);
   } else {
     jobType = input.type;
   }
@@ -146,4 +147,24 @@ export function resolveInput(input: EnqueueInput): EnqueueOptions {
   }
 
   return opts;
+}
+
+// --- Deprecation warnings ---
+
+// One warning per unique job function, ever. WeakSet so job functions
+// can still be GC'd even after we've warned about them.
+const warnedFunctions = new WeakSet<JobFunction>();
+
+function warnJobFunctionDeprecated(fn: JobFunction, jobType: string): void {
+  if (warnedFunctions.has(fn)) return;
+  warnedFunctions.add(fn);
+  process.emitWarning(
+    "Job functions are deprecated and will removed in v1.0. " +
+      `Migrate ${jobType} to ` +
+      `client.enqueue({type: '${jobType}', queue: '...', payload: ...}).`,
+    {
+      type: "DeprecationWarning",
+      code: "ZIZQ_JOB_FUNCTIONS_DEPRECATED",
+    },
+  );
 }

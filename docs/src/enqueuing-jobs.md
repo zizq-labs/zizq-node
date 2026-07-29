@@ -5,12 +5,6 @@ The Zizq Node client exposes two enqueue methods:
 - `client.enqueue(input)` — enqueue a single job.
 - `client.enqueueBulk(inputs)` — enqueue many jobs in a single HTTP request.
 
-> [!NOTE]
-> Both [Job Functions](./handlers.md#job-functions) and raw job inputs use the
-> same enqueue methods. The only difference is that Job Functions can be
-> passed directly as the `type`, and any `zizqOptions` are automatically used
-> as default options when enqueueing that job type.
-
 > JS:
 >
 > ```ts
@@ -24,16 +18,9 @@ The Zizq Node client exposes two enqueue methods:
 >   { type: "send_email", queue: "emails", payload: { userId: 1 } },
 >   { type: "send_email", queue: "emails", payload: { userId: 2 } },
 > ]);
-> 
-> await client.enqueue({
->   type: sendEmail,
->   payload: { userId: 42, template: "welcome" },
-> });
 > ```
 
-Both accept either a string job `type` or a function reference with attached
-`zizqOptions`, which lets the function itself carry its default `queue`,
-`priority`, `backoff`, etc.
+Both accept enqueue inputs in the same shape.
 
 ## Single enqueue
 
@@ -72,9 +59,12 @@ the order matching the inputs.
 
 The following options are available on the inputs to `client.enqueue()` and
 `client.enqueueBulk()`. All of `type`, `queue` and `payload` are _required_
-inputs, though [Job Functions](./handlers.md#job-functions) may specify their
-queue in `zizqOptions`, meaning it is implicitly provided to `client.enqueue()`
-and `client.enqueueBulk()`.
+inputs.
+
+> [!TIP]
+> For more details on the `jq` query language, read the language specification
+> on the [jaq website](https://gedenkt.at/jaq/manual/#corelang) or on
+> [jq](https://jqlang.org/manual/#basic-filters).
 
 <table>
     <thead>
@@ -87,12 +77,10 @@ and `client.enqueueBulk()`.
         <tr>
             <td>
                 <div><code>type</code></div>
-                <div><pre>string | JobFunction</pre></div>
+                <div><pre>string</pre></div>
             </td>
             <td>
-                The type that identifies this job. Either a string, or a
-                named JavaScript function, with optional attached
-                <code>zizqOptions</code>.
+                The type that identifies this job.
             </td>
         </tr>
         <tr>
@@ -229,11 +217,16 @@ and `client.enqueueBulk()`.
         <tr>
             <td>
                 <div><code>uniqueKey</code></div>
-                <div><pre>string?</pre></div>
+                <div><pre>(string | (EnqueueInput) => string)?</pre></div>
             </td>
             <td>
                 Optional unique key used to handle enqueue-time de-duplication
-                of jobs. <em>Requires a Pro license on the server</em>.
+                of jobs. Can be a function receiving the full enqueue input
+                object and returning a string. Generally applications will use
+                <code>payloadHasher()</code> to produce a configurable hash
+                function here. A job that is unique across all of its payload
+                uses simply <code>{ uniqueKey: payloadHasher() }</code>.
+                <em>requires a pro license on the server</em>.
             </td>
         </tr>
         <tr>
@@ -262,5 +255,131 @@ and `client.enqueueBulk()`.
                 </ul>
             </td>
         </tr>
+        <tr>
+            <td>
+                <div><code>batch</code></div>
+                <div><pre>BatchConfig?</pre></div>
+            </td>
+            <td>
+                Optional batched jobs configuration for this job. Batched jobs
+                allow multiple jobs to be folded/coalesced together into a
+                larger batch job. Generally applications will use the
+                <code>batchConfig()</code> helper rather than construct this
+                object manually. For example, a job that holds an array in its
+                <code>items</code> key could be configured to accumulate
+                batches of up to 1000 items using
+                <code>{ batch: batchConfig(1000, '.items') }</code>.
+                <em>requires a pro license on the server</em>.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>batch.key</code></div>
+                <div><pre>string | (EnqueueInput) => string</pre></div>
+            </td>
+            <td>
+                Shared batch key used to identify jobs that can be folded
+                together. Can be a function receiving the full enqueue input
+                object and returning a string. Generally applications will use
+                <code>payloadHasher()</code> to produce a configurable hash
+                function here.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>batch.when</code></div>
+                <div><pre>string</pre></div>
+            </td>
+            <td>
+                A <code>jq</code> expression evaluated whenever a subsequent
+                enqueue occurs using the same <code>batch.key</code>. This acts
+                as a predicate returning a boolean-ish result indicating
+                whether the new job can be folded into the existing job, or a
+                new job should be enqueued, starting a new batch and sealing
+                the existing batch. The expression has two implicitly bound
+                variables <code>$existing</code> and <code>$new</code>. These
+                are bound to the existing job's payload, and the incoming job's
+                payload. The typical use case is to return true if the combined
+                payload length is below a desired threshold. If the expression
+                returns a truthy value, Zizq evaluates the
+                <code>batch.fold</code> expression to derive the folded
+                payload. For example, a job that holds an array in its
+                <code>items</code> key could be configured to accumulate up to
+                1000 items before being sealed and starting a new batch by
+                using the expression
+                <code>($existing.items + $new.items) | length &lt;= 1000</code>.
+                As a defensive measure against writing an invalid
+                <code>jq</code> expression, this expression is validated by
+                binding both <code>$existing</code> and <code>$new</code> to
+                the incoming payload before the job is enqueued.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>batch.fold</code></div>
+                <div><pre>string</pre></div>
+            </td>
+            <td>
+                A <code>jq</code> expression evaluated whenever a subsequent
+                enqueue occurs using the same <code>batch.key</code> and
+                <code>batch.when</code> evaluates to a truthy value. This acts
+                as a reducer expression combining the existing job's payload
+                with the new payload. The expression has two implicitly bound
+                variables <code>$existing</code> and <code>$new</code>. These
+                are bound to the existing job's payload, and the incoming job's
+                payload. The typical use case is to concatenate two arrays
+                together, either for the entire payload, or at a sub-path of
+                the payload, though any reasonably complex logic may be applied
+                here. For example, a job that holds an array in its
+                <code>items</code> key could be configured to fold new items
+                into itself using the expression
+                <code>$existing | .items + $new.items</code>. As a defensive
+                measure against writing an invalid <code>jq</code> expression,
+                this expression is validated by binding both
+                <code>$existing</code> and <code>$new</code> to the incoming
+                payload before the job is enqueued.
+            </td>
+        </tr>
     </tbody>
 </table>
+
+## Dynamic Job Configuration
+
+The inputs to enqueue jobs are plain JavaScript objects. Applications can
+implement helper functions to provide enqueue inputs for jobs dynamically. For
+example changing the priority based on the time of day, or based on details in
+the job payload.
+
+> JS:
+> ```ts
+> import type { EnqueueInput } from "@zizq-labs/zizq";
+> 
+> export type SendEmailPayload = {
+>   to: string;
+>   subject: string;
+> };
+> 
+> export function sendEmailJob(payload: SendEmailPayload): EnqueueInput {
+>   return {
+>     type: "send_email",
+>     queue: "emails",
+>     priority: payload.to.endsWith("@important.com") ? 10 : 100,
+>     payload,
+>   };
+> }
+> ```
+
+Just wrap the payload with the job of the appropriate type.
+
+> JS:
+> ```ts
+> import { Client } from "@zizq-labs/zizq";
+> import { sendEmailJob } from "./jobs";
+> 
+> const client = new Client({ url: "http://localhost:7890" });
+> 
+> await client.enqueue(sendEmailJob({
+>   to: "example@important.com",
+>   subject: "Important email",
+> }));
+> ```

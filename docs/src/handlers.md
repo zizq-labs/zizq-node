@@ -45,10 +45,8 @@ We can enqueue jobs intended for such a handler like this:
 
 ## Router
 
-For more explicit dispatch — particularly in cross-language workflows
-where jobs are enqueued by another service that agrees on a `type` string
-with the consumer — the client ships a `Router`. Routes are registered
-explicitly against a type name, with a chainable builder API.
+For more declarative dispatch the client ships a `Router`. Routes are
+registered explicitly against a type name using a chainable builder API.
 
 > JS:
 >
@@ -67,10 +65,10 @@ explicitly against a type name, with a chainable builder API.
 > ```
 
 Handlers receive the unwrapped `payload` and the full `job` for cases where
-they need metadata. Most handlers only need the payload — JavaScript lets
-you ignore the second argument.
+they need metadata. Most handlers only need the payload in which case the
+second argument need not be declared.
 
-We can enqueue jobs intended for the router like this:
+We can enqueue jobs intended for the router in the same way:
 
 > JS:
 >
@@ -105,8 +103,8 @@ If no route matches and no fallback is registered, the router throws
 failure: the job is nacked, retried per the backoff policy, and eventually
 dead-lettered once the retry limit is hit.
 
-Fallbacks have the same signature as a compiled router, so you can delegate
-one router to another:
+Because compiled routers are just regular handler functions, fallbacks have the
+same signature as a compiled router, so you can delegate one router to another:
 
 > JS:
 >
@@ -136,6 +134,11 @@ selectively overriding individual routes for a particular environment:
 > ```
 
 ## Job Functions
+
+> [!WARNING]
+> Job Functions as defined in this section are deprecated, no new functionality
+> will be added using them and they will be removed in a future 1.x release.
+> Applications should use [`Router`](#router) instead.
 
 The Node client also allows using the function name as an implicit `type` and
 building a handler function from such functions. These are called Job
@@ -185,6 +188,11 @@ We can enqueue jobs intended for such a handler like this:
 > enqueueing by the job function directly can be convenient later.
 
 ### Attaching options to job functions
+
+> [!WARNING]
+> Job Functions as defined in this section are deprecated, no new functionality
+> will be added using them and they will be removed in a future 1.x release.
+> Applications can spread shared enqueue options directly.
 
 Job functions defined in this way can also have associated `zizqOptions`
 defined on them. This can be used to explicitly set the `type` that the
@@ -332,10 +340,13 @@ Both arguments are optional.
 
 #### Specifying Job Uniqueness
 
-> [!TIP]
-> This section of the documentation deals mostly with how to define unique jobs
-> using Job Functions with `zizqOptions`. See [Unique Jobs](./unique-jobs.md)
-> for more detailed documentation on using this feature.
+> [!WARNING]
+> Job Functions as defined in this section are deprecated, no new functionality
+> will be added using them and they will be removed in a future 1.x release.
+> The interface for unique jobs described here is deprecated. Applications
+> should provide a `uniqueKey` directly at the enqueue site instead. See
+> [Unique Jobs](./unique-jobs.md) for more detailed documentation on using this
+> feature.
 
 Unique jobs requires a pro license on the server. Zizq is able to prevent
 duplicate enqueues of the same job within a specified job lifecycle scope. Use
@@ -509,10 +520,12 @@ This just sugar for the equivalent composition:
 
 ### Dynamic Job Configuration { #dynamic-config }
 
-> [!TIP]
-> All `zizqOptions` settings, except `type`, can also be overridden explicitly
-> by passing any overrides directly to `client.enqueue()`, such as
-> `client.enqueue({type: fn, queue: "other", payload: {hello: "world"}})`.
+> [!WARNING]
+> Job Functions as defined in this section are deprecated, no new functionality
+> will be added using them and they will be removed in a future 1.x release.
+> Dynamic job configuration is better handled with regular functions that build
+> the enqueue inputs to be passed directly to
+> [`client.enqueue()`](./enqueueing-jobs.md).
 
 When the client generates parameters to send to the Zizq server, it reads the
 `zizqOptions` from the Job Function, resolves the result, and optionally passes

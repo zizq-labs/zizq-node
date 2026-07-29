@@ -61,6 +61,17 @@
   `payload-hasher.ts` (private) so the two modules form a one-way
   dependency instead of a cycle.
 
+- **Deprecated: job functions** (`fn.zizqOptions` + `buildHandler`).
+  The direct-shape API (`client.enqueue({type: '...', ...})`,
+  `payloadHasher`, `batchConfig`, `Router`) covers everything job
+  functions did without the mixin. Job functions continue to work in
+  0.6.x but emit a Node deprecation warning
+  (`ZIZQ_JOB_FUNCTIONS_DEPRECATED`) — once per process for
+  `buildHandler`, once per unique function for
+  `client.enqueue({type: fn, ...})`. Filterable via
+  `NODE_OPTIONS='--no-warnings-code=ZIZQ_JOB_FUNCTIONS_DEPRECATED'`
+  if migration is deferred. Removal planned for v1.0.
+
 - Requires Zizq server **0.6.0** or later.
 
 ## 0.5.0
