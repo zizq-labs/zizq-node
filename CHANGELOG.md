@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.6.1
+
+- **`TestClient`** — new drop-in subclass of `Client` for tests.
+  Buffers `enqueue` / `enqueueBulk` / `enqueueRaw` / `enqueueBulkRaw`
+  calls in memory instead of hitting the server. Read/mutation/
+  streaming methods raise `NotSupportedError`. Construct with no
+  args:
+
+      import { TestClient } from "@zizq-labs/zizq";
+      const client = new TestClient();
+      await someService.run(client);
+      assert.ok(client.enqueued("send_email"));
+
+  Status-filtered accessors (`enqueuedJobs`, `pendingJobs`,
+  `inFlightJobs`, `completedJobs`, `deadJobs`) and predicates
+  (`enqueued(type, payload?)`, `enqueuedCount(type, payload?)`)
+  return the buffer contents. `enqueuedOptions()` surfaces the
+  resolved `EnqueueOptions` for tests that need metadata like
+  `uniqueKey` or `readyAt`. `clear()` resets between test cases.
+
+- **`TestClient.dispatch(handler, options?)`** — drain runnable
+  buffered jobs through a `JobHandler` (typically a `Router.build()`
+  result). Defaults to a single-snapshot pass: entries enqueued from
+  within a handler stay buffered for the next call. `recursive: true`
+  loops until nothing matches, with `maxIterations` (default `1000`)
+  guarding against unconditional re-enqueue. Handler exceptions move
+  the entry to `dead` and re-throw.
+
+- **`TestJobFilters`** — the shared filter shape used by every buffer
+  accessor and `dispatch`. Fields: `onlyQueues`, `exceptQueues`,
+  `onlyTypes`, `exceptTypes`, `filter` (a predicate over `Job`). All
+  ANDed. `TestDispatchOptions extends TestJobFilters` adds
+  `recursive` and `maxIterations`.
+
+- **`NotSupportedError`** — thrown when test code reaches a method
+  that isn't buffered (server reads, streaming, cron, etc.). Includes
+  the method name in the message so failures point at the caller.
+
+- **`Client` extraction hook** — the request/stream dispatcher setup
+  moved from the constructor into a `protected buildDispatchers()`
+  method so `TestClient` can supply its own transport without
+  duplicating the pool construction logic. No behaviour change for
+  direct `Client` users.
+
+- **`"development"` export condition** — `package.json` `exports`
+  now includes a `development` condition pointing at `./src/index.ts`
+  (in addition to the existing `import` → `./dist/index.js` and
+  `types` conditions). Non-breaking: only fires when the consumer
+  passes `--conditions=development` at runtime. Enables in-repo
+  examples to resolve the client from source without a prior `dist/`
+  build.
+
+- **Examples** — new `examples/audit_log/` (consumer sink;
+  Express + `node:sqlite` + `Router` with a standalone worker) and
+  `examples/uptime_monitor/` (producer + consumer; embedded worker,
+  cron sweep, sitemap discovery, `TestClient` in the suite). Each is
+  self-contained with its own `package.json`, tests, and README.
+  Covered by a new `examples` matrix job in CI.
+
+
 ## 0.6.0
 
 - **Batched jobs** (Pro) — new `batch` field on the enqueue input for
