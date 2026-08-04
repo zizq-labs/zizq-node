@@ -56,7 +56,7 @@ export type Format = "json" | "msgpack";
  * This is used in the following formula:
  *
  * ```
- * t = baseMs + (attempts ** exponent) + (attempts * random() * jitterMs)
+ * t = baseMs + (attempts ** exponent * 1000) + (attempts * random() * jitterMs)
  * ```
  *
  * The random jitter is designed to ensure clusters of failed jobs do not all
