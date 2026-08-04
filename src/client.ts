@@ -369,9 +369,9 @@ const STREAM_ACCEPT: Record<Format, string> = {
  */
 export class Client {
   /** Pool for request/response traffic (enqueue, ack, failure, get). */
-  private http: Dispatcher;
+  protected http: Dispatcher;
   /** Separate pool for long-lived streaming connections (take). */
-  private streamHttp: Dispatcher;
+  protected streamHttp: Dispatcher;
   /** The base URL of the Zizq server. */
   readonly url: string;
   /** Serialization format. */
@@ -390,70 +390,89 @@ export class Client {
     this.accept = CONTENT_TYPES[this.format];
     this.streamAccept = STREAM_ACCEPT[this.format];
 
+    const dispatchers = this.buildDispatchers(options);
+    this.http = dispatchers.http;
+    this.streamHttp = dispatchers.streamHttp;
+  }
+
+  /**
+   * Build the request/response and stream dispatchers.
+   *
+   * Extracted so subclasses (e.g. `TestClient`) can supply their own
+   * transport without duplicating the HTTP-pool construction logic. Not
+   * part of the public API — override at your own risk.
+   *
+   * @internal
+   */
+  protected buildDispatchers(options: ClientOptions): {
+    http: Dispatcher;
+    streamHttp: Dispatcher;
+  } {
+    if (options.dispatcher) {
+      // Testing: use the same dispatcher for both.
+      return { http: options.dispatcher, streamHttp: options.dispatcher };
+    }
+
     const connectTimeout = options.connectTimeout ?? 10_000;
     const readTimeout = options.readTimeout ?? 30_000;
     const streamIdleTimeout = options.streamIdleTimeout ?? 30_000;
 
-    if (options.dispatcher) {
-      // Testing: use the same dispatcher for both.
-      this.http = options.dispatcher;
-      this.streamHttp = options.dispatcher;
-    } else {
-      const connectOpts = {
-        ...(options.tls ? {
-          ca: options.tls.ca,
-          cert: options.tls.cert,
-          key: options.tls.key,
-        } : {}),
-        timeout: connectTimeout,
-      };
+    const connectOpts = {
+      ...(options.tls ? {
+        ca: options.tls.ca,
+        cert: options.tls.cert,
+        key: options.tls.key,
+      } : {}),
+      timeout: connectTimeout,
+    };
 
-      // HTTP/2 for request/response traffic (multiplexed acks,
-      // enqueues, queries). `useH2c: true` lets undici speak HTTP/2
-      // over cleartext via prior knowledge, so http:// URLs get h2
-      // multiplexing too — not just https://. The Zizq server's hyper
-      // stack already accepts h2 prior-knowledge on any connection
-      // via its auto-protocol detector.
-      //
-      // `bodyTimeout` is per-chunk inactivity — reset on each byte —
-      // so it acts as the read timeout; `headersTimeout` caps
-      // "server accepted the request but didn't respond" cases.
-      this.http = new Pool(this.url, {
-        allowH2: true,
-        // `useH2c` is supported at runtime in undici >=8 but isn't
-        // present in the public type definitions yet. Remove the
-        // expect-error once undici ships the type.
-        // @ts-expect-error -- runtime-supported, untyped
-        useH2c: true,
-        maxConcurrentStreams: options.maxConcurrentStreams ?? 1024,
-        connect: connectOpts,
-        headersTimeout: readTimeout,
-        bodyTimeout: readTimeout,
-      });
+    // HTTP/2 for request/response traffic (multiplexed acks,
+    // enqueues, queries). `useH2c: true` lets undici speak HTTP/2
+    // over cleartext via prior knowledge, so http:// URLs get h2
+    // multiplexing too — not just https://. The Zizq server's hyper
+    // stack already accepts h2 prior-knowledge on any connection
+    // via its auto-protocol detector.
+    //
+    // `bodyTimeout` is per-chunk inactivity — reset on each byte —
+    // so it acts as the read timeout; `headersTimeout` caps
+    // "server accepted the request but didn't respond" cases.
+    const http = new Pool(this.url, {
+      allowH2: true,
+      // `useH2c` is supported at runtime in undici >=8 but isn't
+      // present in the public type definitions yet. Remove the
+      // expect-error once undici ships the type.
+      // @ts-expect-error -- runtime-supported, untyped
+      useH2c: true,
+      maxConcurrentStreams: options.maxConcurrentStreams ?? 1024,
+      connect: connectOpts,
+      headersTimeout: readTimeout,
+      bodyTimeout: readTimeout,
+    });
 
-      // HTTP/1.1 for the long-lived take stream. HTTP/2 adds framing
-      // overhead and flow control with no multiplexing benefit on a
-      // single long-lived response, resulting in measurably lower
-      // throughput compared to HTTP/1.1 chunked transfer.
-      //
-      // `bodyTimeout` here uses `streamIdleTimeout` rather than the
-      // normal `readTimeout`: server heartbeats reset it on each frame,
-      // so this only fires when the connection has actually gone
-      // silent. The Worker's reconnect path handles the resulting
-      // BodyTimeoutError.
-      //
-      // `headersTimeout` stays on `readTimeout`: the response headers
-      // are a one-shot request/response pair like any other API call,
-      // only the body streams. Falling through to undici's 5-minute
-      // default would leave a server stuck pre-headers blocking the
-      // worker far longer than the user-configured timeout would suggest.
-      this.streamHttp = new Pool(this.url, {
-        allowH2: false,
-        connect: connectOpts,
-        headersTimeout: readTimeout,
-        bodyTimeout: streamIdleTimeout,
-      });
-    }
+    // HTTP/1.1 for the long-lived take stream. HTTP/2 adds framing
+    // overhead and flow control with no multiplexing benefit on a
+    // single long-lived response, resulting in measurably lower
+    // throughput compared to HTTP/1.1 chunked transfer.
+    //
+    // `bodyTimeout` here uses `streamIdleTimeout` rather than the
+    // normal `readTimeout`: server heartbeats reset it on each frame,
+    // so this only fires when the connection has actually gone
+    // silent. The Worker's reconnect path handles the resulting
+    // BodyTimeoutError.
+    //
+    // `headersTimeout` stays on `readTimeout`: the response headers
+    // are a one-shot request/response pair like any other API call,
+    // only the body streams. Falling through to undici's 5-minute
+    // default would leave a server stuck pre-headers blocking the
+    // worker far longer than the user-configured timeout would suggest.
+    const streamHttp = new Pool(this.url, {
+      allowH2: false,
+      connect: connectOpts,
+      headersTimeout: readTimeout,
+      bodyTimeout: streamIdleTimeout,
+    });
+
+    return { http, streamHttp };
   }
 
   /**

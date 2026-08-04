@@ -82,3 +82,6 @@ export type { PayloadHasherOptions } from "./payload-hasher.ts";
 
 export { batchConfig } from "./batch-config.ts";
 export type { BatchConfigOptions } from "./batch-config.ts";
+
+export { TestClient, NotSupportedError } from "./test-client.ts";
+export type { TestJobFilters, TestDispatchOptions } from "./test-client.ts";
