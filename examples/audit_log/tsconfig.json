@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "ESNext.Array", "ES2024.Promise"],
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": true,
+    "customConditions": ["development"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "bin/**/*.ts", "test/**/*.ts"]
+}
