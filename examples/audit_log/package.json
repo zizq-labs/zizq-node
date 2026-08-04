@@ -1,0 +1,32 @@
+{
+  "name": "audit-log-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zizq Node client example: cross-language audit log sink (Express + node:sqlite + Router).",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n web,worker -c cyan,magenta \"npm run web\" \"npm run worker\"",
+    "web": "node --experimental-strip-types --conditions=development src/server.ts",
+    "worker": "node --experimental-strip-types --conditions=development src/worker.ts",
+    "simulate": "node --experimental-strip-types --conditions=development bin/simulate.ts",
+    "migrate": "node --experimental-strip-types --conditions=development src/migrate.ts",
+    "test": "node --test --experimental-strip-types 'test/**/*.test.ts'"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@zizq-labs/zizq": "file:../..",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.0",
+    "@types/node": "^25.5.2",
+    "@types/supertest": "^6.0.2",
+    "concurrently": "^9.1.0",
+    "supertest": "^7.0.0",
+    "typescript": "^6.0.3"
+  }
+}

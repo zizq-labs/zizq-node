@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Audit Log</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <h1>Audit Log</h1>
+    <p class="hint">
+      Events from systems that have integrated with this sink.
+      Producers enqueue <code>audit.create</code> jobs to the
+      <code><%= queue %></code> queue.
+    </p>
+  </header>
+
+  <main>
+    <% if (events.length === 0) { %>
+      <p class="empty">No audit events yet.</p>
+    <% } else { %>
+      <table class="events">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Source</th>
+            <th>Type</th>
+            <th>Actor</th>
+            <th>Resource</th>
+            <th>Text</th>
+            <th>Data</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% events.forEach(function(e) { %>
+            <tr>
+              <td class="when" title="<%= e.occurredAt.toISOString() %>"><%= helpers.timeAgo(e.occurredAt) %></td>
+              <td class="source"><%= e.source %></td>
+              <td class="type"><code><%= e.eventType %></code></td>
+              <td><%= e.actor || '' %></td>
+              <td class="resource"><%= e.resource || '' %></td>
+              <td><%= e.text || '' %></td>
+              <td class="data">
+                <% var formatted = helpers.formatData(e.data); %>
+                <% if (formatted) { %>
+                  <pre><%= formatted %></pre>
+                <% } %>
+              </td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+
+      <% if (hasCursor || nextCursor) { %>
+        <p class="pagination">
+          <% if (hasCursor) { %>
+            <a href="/">&larr; Newest</a>
+          <% } %>
+          <% if (nextCursor) { %>
+            <a href="/?cursor=<%= encodeURIComponent(nextCursor) %>">Older &rarr;</a>
+          <% } %>
+        </p>
+      <% } %>
+    <% } %>
+  </main>
+</body>
+</html>
