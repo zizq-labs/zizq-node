@@ -9,3 +9,4 @@
 - [Unique Jobs](./unique-jobs.md)
 - [Batched Jobs](./batched-jobs.md)
 - [Querying & Managing Jobs](./querying-jobs.md)
+- [Testing](./testing.md)
