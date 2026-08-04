@@ -1,0 +1,33 @@
+{
+  "name": "uptime-monitor-example",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zizq Node client example: uptime monitor with embedded worker, cron sweep, and sitemap discovery.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types --conditions=development src/server.ts",
+    "worker": "node --experimental-strip-types --conditions=development src/worker.ts",
+    "migrate": "node --experimental-strip-types --conditions=development src/migrate.ts",
+    "test": "node --test --experimental-strip-types --conditions=development 'test/**/*.test.ts'"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@zizq-labs/zizq": "file:../..",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0",
+    "express-session": "^1.18.1",
+    "fast-xml-parser": "^5.0.0",
+    "undici": "^8.0.2"
+  },
+  "devDependencies": {
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.0",
+    "@types/express-session": "^1.18.1",
+    "@types/node": "^25.5.2",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "typescript": "^6.0.3"
+  }
+}
