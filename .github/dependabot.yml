@@ -12,10 +12,20 @@
 # Note: Dependabot doesn't support per-dependency-type versioning
 # strategy in a single npm entry. Security advisories override this
 # and PR regardless via Dependabot security updates.
+#
+# IMPORTANT: the example apps under `examples/` have their own
+# `package-lock.json` files and are NOT covered by the root entry. A
+# directory missing from the list below is invisible to version
+# updates — and to the automatic PRs that fix a security advisory, so
+# an alert gets raised and then never patched. Add every new example
+# here.
 version: 2
 updates:
   - package-ecosystem: "npm"
-    directory: "/"
+    directories:
+      - "/"
+      - "/examples/audit_log"
+      - "/examples/uptime_monitor"
     schedule:
       interval: "weekly"
       day: "monday"
