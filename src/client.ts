@@ -983,6 +983,7 @@ export class Client {
   async replaceCronGroup(name: string, options: ReplaceCronGroupOptions): Promise<CronGroup> {
     const body = stripUndefined({
       paused: options.paused,
+      timezone: options.timezone,
       entries: options.entries.map(cronEntryToApi),
     });
     const raw = await this.handleResponse(
@@ -1687,6 +1688,7 @@ function cronGroupFromApi(raw: unknown): CronGroupData {
   return {
     name: r.name as string,
     paused: r.paused as boolean,
+    timezone: r.timezone as string | undefined,
     pausedAt: r.paused_at as number | undefined,
     resumedAt: r.resumed_at as number | undefined,
     entries: entries.map(cronEntryFromApi),

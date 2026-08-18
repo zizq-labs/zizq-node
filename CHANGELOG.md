@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0 (Unreleased)
+
+- **Schedule-level cron timezones are now stored on the server.** The
+  `timezone` passed to `cron(name).register()` is sent as the group's
+  own timezone instead of being copied onto every entry as it was
+  before. The server applies it to each entry that does not specify one
+  of its own, so what actually runs is unchanged — but the timezone now
+  survives a read of the schedule:
+
+      await client.cron("my-cron").register({
+        timezone: "Europe/London",
+        entries: [
+          { name: "digest", expression: "0 9 * * *", type: sendDigest, payload: {} },
+        ],
+      });
+
+      (await client.cron("my-cron").get()).timezone; // "Europe/London"
+
+  An entry with its own `timezone` still overrides the group's.
+  `CronGroup.timezone` is new, as is `timezone` on
+  `ReplaceCronGroupOptions` for the low-level `replaceCronGroup()`.
+
+  This requires **Zizq 0.7.0 or newer** on the server, which a 0.7.0
+  client already does. Note that registering a schedule from a 0.7.0
+  client over one written by an older client clears the per-entry
+  timezone copies the older client wrote — the effective timezone is
+  unchanged, but an *older* client reading that schedule back will no
+  longer see a timezone anywhere, since it does not know about the
+  group-level field.
+
 ## 0.6.1
 
 - **`TestClient`** — new drop-in subclass of `Client` for tests.
