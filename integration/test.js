@@ -333,6 +333,65 @@ describe("integration", { concurrency: 1 }, () => {
     }
   });
 
+  // The schedule's timezone is the schedule's, not a copy smeared over every
+  // entry, so a re-fetch still reports it and entries that chose their own
+  // keep it.
+  it("cron: group timezone round-trips", async () => {
+    try {
+      const cron = client.cron("integration-test");
+
+      await cron.register({
+        timezone: "Australia/Melbourne",
+        entries: [
+          { name: "inherits", expression: "0 9 * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+          { name: "scoped", expression: "0 9 * * *", timezone: "UTC", type: "cron_test", queue: "cron-integration", payload: {} },
+        ],
+      });
+
+      const fetched = await cron.get();
+      const inherits = fetched.entries.find(e => e.name === "inherits");
+      const scoped = fetched.entries.find(e => e.name === "scoped");
+
+      assert.equal(fetched.timezone, "Australia/Melbourne");
+      assert.equal(inherits.timezone, undefined);
+      assert.equal(scoped.timezone, "UTC");
+
+      // And the schedule's timezone is what the inheriting entry actually
+      // runs in: 9am in Melbourne is not 9am in UTC.
+      assert.notEqual(inherits.nextEnqueueAt, scoped.nextEnqueueAt);
+
+      await cron.delete();
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) {
+        return; // skip — no Pro license
+      }
+      throw err;
+    }
+  });
+
+  // Registering replaces the schedule whole, so a timezone left out goes.
+  it("cron: re-registering without a timezone clears it", async () => {
+    try {
+      const cron = client.cron("integration-test");
+      const entries = [
+        { name: "a", expression: "0 9 * * *", type: "cron_test", queue: "cron-integration", payload: {} },
+      ];
+
+      await cron.register({ timezone: "Australia/Melbourne", entries });
+      assert.equal((await cron.get()).timezone, "Australia/Melbourne");
+
+      await cron.register({ entries });
+      assert.equal((await cron.get()).timezone, undefined);
+
+      await cron.delete();
+    } catch (err) {
+      if (err instanceof ClientError && err.status === 403) {
+        return; // skip — no Pro license
+      }
+      throw err;
+    }
+  });
+
   it("cron: redefine removes absent entries", async () => {
     try {
       const cron = client.cron("integration-test");

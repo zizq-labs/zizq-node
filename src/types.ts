@@ -385,7 +385,8 @@ export interface CronEntryInput {
   /**
    * The time zone in which the cron expression is evaluated.
    *
-   * When not specified, the server system time zone applies.
+   * When not specified, the group's time zone applies, falling back to the
+   * server system time zone when the group does not specify one either.
    */
   timezone?: string;
 
@@ -400,6 +401,15 @@ export interface CronEntryInput {
 export interface ReplaceCronGroupOptions {
   /** True if this group is paused. */
   paused?: boolean;
+
+  /**
+   * The time zone applied to every entry that does not specify one of its
+   * own.
+   *
+   * Since this replaces the group in full, omitting it clears whatever time
+   * zone the group had. Requires Zizq 0.7.0 or newer on the server.
+   */
+  timezone?: string;
 
   /** Named collection of entries present in this group. */
   entries: CronEntryInput[];

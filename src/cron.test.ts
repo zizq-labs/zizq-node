@@ -111,21 +111,26 @@ describe("CronHandle", () => {
     });
   });
 
-  it("register() propagates group timezone to entries", async () => {
+  // Sent as the group's timezone rather than copied onto each entry, so a
+  // schedule read back still reports which timezone it runs in.
+  it("register() sends the group timezone on the group", async () => {
     ctx.mockPool
       .intercept({
         path: "/crons/default",
         method: "PUT",
         body: (body: string) => {
           const parsed = JSON.parse(body);
-          return parsed.entries[0].timezone === "Australia/Melbourne";
+          return (
+            parsed.timezone === "Australia/Melbourne" &&
+            parsed.entries[0].timezone === undefined
+          );
         },
       })
-      .reply(200, cronGroupResponse, {
+      .reply(200, { ...cronGroupResponse, timezone: "Australia/Melbourne" }, {
         headers: { "content-type": "application/json" },
       });
 
-    await ctx.client.cron("default").register({
+    const group = await ctx.client.cron("default").register({
       timezone: "Australia/Melbourne",
       entries: [{
         name: "e1",
@@ -135,6 +140,8 @@ describe("CronHandle", () => {
         payload: {},
       }],
     });
+
+    assert.equal(group.timezone, "Australia/Melbourne");
   });
 
   it("register() allows entry-level timezone to override group", async () => {
@@ -144,7 +151,10 @@ describe("CronHandle", () => {
         method: "PUT",
         body: (body: string) => {
           const parsed = JSON.parse(body);
-          return parsed.entries[0].timezone === "Europe/London";
+          return (
+            parsed.timezone === "Australia/Melbourne" &&
+            parsed.entries[0].timezone === "Europe/London"
+          );
         },
       })
       .reply(200, cronGroupResponse, {
@@ -162,6 +172,43 @@ describe("CronHandle", () => {
         payload: {},
       }],
     });
+  });
+
+  it("register() omits the timezone when none is given", async () => {
+    ctx.mockPool
+      .intercept({
+        path: "/crons/default",
+        method: "PUT",
+        body: (body: string) => !("timezone" in JSON.parse(body)),
+      })
+      .reply(200, cronGroupResponse, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const group = await ctx.client.cron("default").register({
+      entries: [{
+        name: "e1",
+        expression: "* * * * *",
+        type: "test",
+        queue: "q",
+        payload: {},
+      }],
+    });
+
+    assert.equal(group.timezone, undefined);
+  });
+
+  it("get() reads the group timezone", async () => {
+    ctx.mockPool
+      .intercept({ path: "/crons/default", method: "GET" })
+      .reply(200, { ...cronGroupResponse, timezone: "Australia/Melbourne" }, {
+        headers: { "content-type": "application/json" },
+      });
+
+    const group = await ctx.client.cron("default").get();
+    assert.equal(group.timezone, "Australia/Melbourne");
+    // The entry inherits it rather than carrying a copy.
+    assert.equal(group.entries[0].timezone, undefined);
   });
 
   it("register() passes paused flag", async () => {

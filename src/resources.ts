@@ -532,6 +532,9 @@ export interface CronGroupData {
   /** Whether the group is paused. */
   paused: boolean;
 
+  /** Time zone applied to entries that do not specify one of their own. */
+  timezone?: string;
+
   /** When the group was last paused (ms since epoch). */
   pausedAt?: number;
 
@@ -635,6 +638,14 @@ export class CronGroup {
   /** Whether the group is paused. */
   readonly paused: boolean;
 
+  /**
+   * Time zone applied to entries that do not specify one of their own.
+   *
+   * Undefined when the group does not specify one, in which case those
+   * entries are evaluated in the server's system time zone.
+   */
+  readonly timezone?: string;
+
   /** When the group was last paused (ms since epoch). */
   readonly pausedAt?: number;
 
@@ -652,6 +663,7 @@ export class CronGroup {
     this.client = client;
     this.name = data.name;
     this.paused = data.paused;
+    this.timezone = data.timezone;
     this.pausedAt = data.pausedAt;
     this.resumedAt = data.resumedAt;
     this.entries = data.entries.map(e => new CronEntry(client, data.name, e));

@@ -28,7 +28,13 @@ export interface CronEntryDefinition {
   /** Cron expression (e.g. "0 9 * * MON"). */
   expression: string;
 
-  /** IANA timezone name (e.g. "Australia/Melbourne"). */
+  /**
+   * IANA timezone name (e.g. "Australia/Melbourne").
+   *
+   * Overrides the group's timezone for this entry. Left unset, the entry is
+   * evaluated in the group's, or in the server's system timezone when the
+   * group does not specify one either.
+   */
   timezone?: string;
 
   /** Whether this entry should be paused. */
@@ -64,7 +70,16 @@ export interface CronEntryDefinition {
 
 /** Options for registering (replacing) a cron schedule. */
 export interface RegisterCronOptions {
-  /** Default timezone for all entries (can be overridden per entry). */
+  /**
+   * Default timezone for all entries (can be overridden per entry).
+   *
+   * Stored on the server as the group's own timezone rather than copied onto
+   * each entry, so it is still there when the schedule is read back. Since
+   * registering replaces the schedule in full, omitting it clears whatever
+   * timezone the group had.
+   *
+   * Requires Zizq 0.7.0 or newer on the server.
+   */
   timezone?: string;
 
   /** Whether the group should be paused. */
@@ -77,11 +92,13 @@ export interface RegisterCronOptions {
 /**
  * Resolve a CronEntryDefinition into a CronEntryInput by resolving
  * function references via the shared resolveInput logic.
+ *
+ * The group's timezone is deliberately not folded in here — it goes to the
+ * server as the group's, and the server applies it to entries that do not
+ * specify one. An entry carrying a copy would look like it had chosen that
+ * timezone for itself, and would not follow the group if it later changed.
  */
-function resolveEntryDefinition(
-  def: CronEntryDefinition,
-  groupTimezone?: string,
-): CronEntryInput {
+function resolveEntryDefinition(def: CronEntryDefinition): CronEntryInput {
   // Resolve the job template using the same logic as enqueue().
   const job = resolveInput({
     type: def.type,
@@ -102,7 +119,7 @@ function resolveEntryDefinition(
   return {
     name: def.name,
     expression: def.expression,
-    timezone: def.timezone ?? groupTimezone,
+    timezone: def.timezone,
     paused: def.paused,
     job,
   };
@@ -221,6 +238,10 @@ export class CronHandle {
    *
    * Supports function references for entry job types, same as `enqueue()`.
    *
+   * The `timezone` applies to every entry that does not specify one of its
+   * own, and is stored as the schedule's own timezone, so reading the
+   * schedule back still reports it.
+   *
    * @example
    * ```ts
    * await client.cron("default").register({
@@ -235,7 +256,8 @@ export class CronHandle {
   async register(options: RegisterCronOptions): Promise<CronGroup> {
     const opts: ReplaceCronGroupOptions = {
       paused: options.paused,
-      entries: options.entries.map(e => resolveEntryDefinition(e, options.timezone)),
+      timezone: options.timezone,
+      entries: options.entries.map(resolveEntryDefinition),
     };
     return this.client.replaceCronGroup(this.name, opts);
   }
