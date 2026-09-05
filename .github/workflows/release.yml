@@ -1,0 +1,179 @@
+# Publishing, split out from CI on purpose.
+#
+# A job gated on `environment: release` waits for a reviewer, and GitHub
+# fails that job automatically if nobody approves within 30 days. While
+# publishing lived in `ci.yml` that meant every merge to main left a
+# pending run which eventually failed, turning the README's CI badge red
+# even though every test had passed. The badge tracks `ci.yml`, so
+# moving publishing here keeps it honest: green means the tests pass.
+#
+# Releasing is now a deliberate act rather than something queued by each
+# merge. Nothing is rebuilt — the tarball published here is the exact
+# artifact a CI run already built and tested.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: >-
+          CI run to release from. Leave blank for the most recent
+          successful run on main.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  # Needed to read the artifacts of another workflow's run.
+  actions: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    environment: release
+    # `id-token: write` lets `npm publish` request an OIDC token from
+    # the GitHub Actions runtime and exchange it for a short-lived
+    # publish credential via npm's Trusted Publisher. No `NPM_TOKEN`
+    # secret needed.
+    #
+    # Trusted Publisher is configured against a specific workflow file,
+    # so npmjs.com must name *this* one rather than `ci.yml`.
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Resolve the CI run
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REQUESTED: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$REQUESTED" ]; then
+            run_id="$REQUESTED"
+          else
+            run_id="$(gh run list --repo "$REPO" \
+                        --workflow ci.yml --branch main \
+                        --status success --limit 1 \
+                        --json databaseId --jq '.[0].databaseId')"
+            if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+              echo "No successful CI run found on main." >&2
+              exit 1
+            fi
+            echo "Using the latest successful CI run on main."
+          fi
+
+          read -r conclusion head_sha head_branch < <(
+            gh run view "$run_id" --repo "$REPO" \
+              --json conclusion,headSha,headBranch \
+              --jq '[.conclusion, .headSha, .headBranch] | @tsv'
+          )
+
+          if [ "$conclusion" != "success" ]; then
+            echo "CI run $run_id concluded '$conclusion', refusing to release from it." >&2
+            exit 1
+          fi
+
+          if [ "$head_branch" != "main" ]; then
+            echo "CI run $run_id is from '$head_branch', not main." >&2
+            exit 1
+          fi
+
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "Releasing from CI run $run_id ($head_sha)."
+
+      # That run's commit, not main's HEAD. The two drift the moment
+      # anything merges after the build, and the release notes have to
+      # describe what is actually being published.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.ci.outputs.sha }}
+
+      - name: Download the package built by that run
+        uses: actions/download-artifact@v8
+        with:
+          name: zizq-node-package
+          path: artifacts
+          run-id: ${{ steps.ci.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # Read back from the artifact rather than recomputed, so a version
+      # bump merged after the build cannot rename what is published.
+      - name: Read the packaged version
+        id: version
+        run: |
+          set -euo pipefail
+          tgz="$(ls artifacts/zizq-*.tgz)"
+          version="$(basename "$tgz" .tgz | sed 's/^zizq-//')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing zizq $version"
+
+      - name: Refuse to release a version that already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+
+          if gh release view "v${version}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release v${version} already exists. Bump the version first." >&2
+            exit 1
+          fi
+
+          if curl -sf "https://registry.npmjs.org/zizq/${version}" >/dev/null; then
+            echo "zizq ${version} is already on npm." >&2
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          sed -n "/^## ${version}/,/^## /p" CHANGELOG.md | head -n -1 | tail -n +2 > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG section found for ${version}." >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          gh release create "v${version}" \
+            --target "${{ steps.ci.outputs.sha }}" \
+            --title "v${version}" \
+            --notes-file release-notes.md \
+            "artifacts/zizq-${version}.tgz" \
+            "artifacts/zizq-${version}.tgz.sha256"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: latest
+          registry-url: https://registry.npmjs.org
+
+      # Authenticates to npm via OIDC (Trusted Publisher must be
+      # configured on the package on npmjs.com to allow this repo +
+      # workflow). With no `NODE_AUTH_TOKEN` env var set, the npm CLI
+      # falls through `.npmrc`'s empty auth slot and uses the OIDC
+      # exchange instead. `--provenance` attaches a signed attestation.
+      #
+      # Last, and deliberately so: an npm publish cannot be undone,
+      # where a GitHub release can.
+      - name: Publish to NPM
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          npm publish "./artifacts/zizq-${version}.tgz" --access public --provenance
