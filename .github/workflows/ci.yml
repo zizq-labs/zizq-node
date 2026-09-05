@@ -6,8 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+# Publishing lives in `release.yml`, so nothing here writes to the repo.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   typecheck:
@@ -191,60 +192,3 @@ jobs:
             echo "  Examples: ${{ needs.examples.result }}"
             exit 1
           fi
-
-  # --- Publish GitHub Release (main only, requires approval) ---
-
-  publish:
-    name: Publish Release
-    needs: [gate, package]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: release
-    runs-on: ubuntu-latest
-    # `id-token: write` lets `npm publish` request an OIDC token from
-    # the GitHub Actions runtime and exchange it for a short-lived
-    # publish credential via npm's Trusted Publisher. No `NPM_TOKEN`
-    # secret needed.
-    permissions:
-      contents: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Download package artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: zizq-node-package
-          path: artifacts
-
-      - name: Extract release notes from CHANGELOG
-        run: |
-          version=${{ needs.package.outputs.version }}
-          sed -n "/^## ${version}/,/^## /p" CHANGELOG.md | head -n -1 | tail -n +2 > release-notes.md
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=${{ needs.package.outputs.version }}
-          gh release create "v${version}" \
-            --title "v${version}" \
-            --notes-file release-notes.md \
-            "artifacts/zizq-${version}.tgz" \
-            "artifacts/zizq-${version}.tgz.sha256"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: latest
-          registry-url: https://registry.npmjs.org
-
-      # Authenticates to npm via OIDC (Trusted Publisher must be
-      # configured on the package on npmjs.com to allow this repo +
-      # workflow). With no `NODE_AUTH_TOKEN` env var set, the npm CLI
-      # falls through `.npmrc`'s empty auth slot and uses the OIDC
-      # exchange instead. `--provenance` attaches a signed attestation
-      # that the tarball was built by this exact workflow run.
-      - name: Publish to NPM
-        run: |
-          version=${{ needs.package.outputs.version }}
-          npm publish "./artifacts/zizq-${version}.tgz" --access public --provenance
