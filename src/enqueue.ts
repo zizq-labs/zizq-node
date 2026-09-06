@@ -136,6 +136,7 @@ export function resolveInput(input: EnqueueInput): EnqueueOptions {
     uniqueKey,
     uniqueWhile: uniqueKey ? uniqueWhile : undefined,
     batch,
+    budgets: input.budgets,
   };
 
   // Apply the transform hook (if any). Transforms can change the options based

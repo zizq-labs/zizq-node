@@ -1698,6 +1698,7 @@ function enqueueToApi(opts: EnqueueOptions): Record<string, unknown> {
     unique_key: opts.uniqueKey,
     unique_while: opts.uniqueWhile,
     batch: opts.batch,
+    budgets: budgetBindingsToApi(opts.budgets),
   });
 }
 
@@ -1798,6 +1799,43 @@ function budgetFromApi(raw: unknown): Budget {
   }) as unknown as Budget;
 }
 
+/**
+ * Convert budget bindings to API format.
+ *
+ * An unthrottled job sends nothing rather than an empty array, which is
+ * how the server reports one back too. `undefined` is then stripped by
+ * the caller, so the field is absent from the body entirely.
+ */
+function budgetBindingsToApi(
+  bindings: BudgetBindingInput[] | undefined
+): Record<string, unknown>[] | undefined {
+  if (bindings === undefined || bindings.length === 0) return undefined;
+
+  return bindings.map((b) =>
+    stripUndefined({
+      key: b.key,
+      cost: b.cost,
+      create_with: b.createWith && budgetPolicyToApi(b.createWith),
+    })
+  );
+}
+
+/**
+ * Convert API-format budget bindings to camelCase.
+ *
+ * Absent means none: the server omits the field entirely for an
+ * unthrottled job rather than sending an empty array, so there is no
+ * "absent" to tell apart from "none".
+ */
+function budgetBindingsFromApi(raw: unknown): BudgetBinding[] {
+  if (!Array.isArray(raw)) return [];
+
+  return raw.map((entry) => {
+    const b = entry as Record<string, unknown>;
+    return { key: b.key as string, cost: b.cost as number };
+  });
+}
+
 /** Convert a BackoffConfig to API format. */
 function backoffToApi(b: BackoffConfig): Record<string, unknown> {
   return { base_ms: b.baseMs, exponent: b.exponent, jitter_ms: b.jitterMs };
@@ -1835,6 +1873,7 @@ function jobFromApi(raw: unknown): JobData {
     duplicate: r.duplicate,
     folded: r.folded,
     batch: r.batch,
+    budgets: budgetBindingsFromApi(r.budgets),
   }) as unknown as JobData;
 }
 
@@ -1934,6 +1973,7 @@ function cronJobToApi(job: EnqueueOptions): Record<string, unknown> {
     unique_key: job.uniqueKey,
     unique_while: job.uniqueWhile,
     batch: job.batch,
+    budgets: budgetBindingsToApi(job.budgets),
   });
 }
 
