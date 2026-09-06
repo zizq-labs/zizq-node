@@ -66,6 +66,27 @@ export interface CronEntryDefinition {
 
   /** Uniqueness scope. */
   uniqueWhile?: EnqueueOptions["uniqueWhile"];
+
+  /**
+   * Batching configuration for the enqueued job.
+   *
+   * A cron entry that fires while a previous job of the same batch is
+   * still pending folds into it rather than creating a second one, so
+   * a schedule can accumulate rather than pile up.
+   *
+   * `key` may be a function, and is resolved against the entry's job
+   * template — `batchConfig()` returns a value shaped for this.
+   */
+  batch?: EnqueueInput["batch"];
+
+  /**
+   * Budgets the enqueued job draws on when it dispatches.
+   *
+   * A scheduled job is throttled the same way an enqueued one is: it
+   * fires on its expression, then waits on the server until its
+   * budgets can afford it.
+   */
+  budgets?: EnqueueOptions["budgets"];
 }
 
 /** Options for registering (replacing) a cron schedule. */
@@ -110,6 +131,8 @@ function resolveEntryDefinition(def: CronEntryDefinition): CronEntryInput {
     retention: def.retention,
     uniqueKey: def.uniqueKey,
     uniqueWhile: def.uniqueWhile,
+    batch: def.batch,
+    budgets: def.budgets,
   });
 
   if (job.readyAt) {
