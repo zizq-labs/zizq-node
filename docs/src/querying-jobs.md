@@ -23,6 +23,8 @@ arrays which form `IN (...)` style conditions.
 * [`addType()`](#client.jobs-byType)
 * [`byStatus()`](#client.jobs-byStatus)
 * [`addStatus()`](#client.jobs-byStatus)
+* [`byBudgetsKey()`](#client.jobs-byBudgetsKey)
+* [`addBudgetsKey()`](#client.jobs-byBudgetsKey)
 
 These methods only accept strings and combine to narrow down the current
 filter (using the `and` operator):
@@ -156,6 +158,31 @@ Valid statuses are:
 > await client.jobs().byQueue("default").byStatus("ready").addStatus("scheduled").count();
 > // 491
 > ```
+
+### `byBudgetsKey()`, `addBudgetsKey()` { #client.jobs-byBudgetsKey }
+
+Narrows the query down to jobs bound to a given budget, or any of a set of
+budgets. See [Concurrency & Rate Limiting](./budgets.md).
+
+> JS:
+>
+> ```ts
+> await client.jobs().byBudgetsKey("emails").count();
+> // 17
+>
+> await client.jobs().byBudgetsKey(["emails", "stripe"]).count();
+> // 42
+>
+> // Unbind everything holding the budget, then remove it.
+> await client.jobs().byBudgetsKey("emails").unbindBudget("emails");
+> await client.deleteBudget("emails");
+> ```
+
+The query also carries the budget-binding operations themselves —
+`bindBudget()`, `rebindBudget()`, `setBudgetCost()`, `unbindBudget()` and
+`clearBudgets()` — which apply to every job the query matches. See
+[Concurrency & Rate Limiting](./budgets.md) for full details on the
+usage.
 
 ### `byJqFilter()`, `addJqFilter()` { #client.jobs-byJqFilter }
 

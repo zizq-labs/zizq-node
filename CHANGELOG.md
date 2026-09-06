@@ -1,6 +1,34 @@
 # Changelog
 
-## 0.7.0 (Unreleased)
+## 0.7.0
+
+- **Budgets** (Pro) — server-side concurrency control and rate limiting.
+  A budget is a named token bucket that jobs draw from, and a job that
+  cannot afford its cost waits rather than dispatching. Two strategies
+  are defined for managing tokens owned by a budget:
+  * `while_in_flight` — concurrency control, managing the number of jobs
+    that can be running at any given time
+  * `time_based` — continuous drip rate limiting, managing the number of
+    jobs that can be dispatched over a given period of time
+
+  See https://zizq.io/docs/clients/node/budgets.html for full details.
+
+- **`ConflictError`** — a `409` now arrives as this rather than a plain
+  `ClientError`. It is thrown where something already exists (a budget
+  key, a cron entry name, a budget binding a job already has) and where
+  something is still referenced (a budget a job or cron entry still
+  draws on).
+
+  It extends `ClientError`, so an existing `instanceof ClientError`
+  check keeps working. Catching it on its own is what declare-on-boot
+  code wants, so that "another instance got there first" reads as
+  success:
+
+      try {
+        await client.defineBudget({ key: "emails", allocation: 100, strategy });
+      } catch (err) {
+        if (!(err instanceof ConflictError)) throw err;
+      }
 
 - **Schedule-level cron timezones are now stored on the server.** The
   `timezone` passed to `cron(name).register()` is sent as the group's

@@ -1,8 +1,8 @@
 # Zizq — Official Node.js Client
 
-Zizq is a simple, zero dependency, single binary job queue system that is both
-fast and durable. It is designed to work in any stack through a simple HTTP
-API.
+Zizq (**/zɪsk/**) is a fast and durable job queue packed into a single native
+binary, built on an embedded LSM database — not on Redis, and not on your
+RDBMS. It works in any stack, crossing programming language boundaries.
 
 This is the official Zizq client library for Node.js, written in TypeScript.
 
@@ -21,6 +21,8 @@ This is the official Zizq client library for Node.js, written in TypeScript.
 * Configurable job retention policies
 * Recurring jobs (cron)
 * Job introspection and management APIs, with support for `jq` query filters
+* Job concurrency control (via token budgets)
+* Job dispatch rate limiting (via token budgets)
 * Unique jobs (de-duplicated)
 * Batched jobs (folded/merged)
 

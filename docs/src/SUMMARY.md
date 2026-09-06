@@ -8,5 +8,6 @@
 - [Cron Scheduling](./cron.md)
 - [Unique Jobs](./unique-jobs.md)
 - [Batched Jobs](./batched-jobs.md)
+- [Concurrency & Rate Limiting](./budgets.md)
 - [Querying & Managing Jobs](./querying-jobs.md)
 - [Testing](./testing.md)
