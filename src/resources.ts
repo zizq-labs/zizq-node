@@ -16,6 +16,7 @@ import type {
   UniqueScope,
   BackoffConfig,
   BatchConfig,
+  BudgetBinding,
   RetentionConfig,
   EnqueueOptions,
   FailureOptions,
@@ -95,6 +96,9 @@ export interface JobData {
    * batched jobs.
    */
   batch?: BatchConfig;
+
+  /** Budgets this job is bound to, if any. Omitted when empty. */
+  budgets: BudgetBinding[];
 }
 
 /**
@@ -185,6 +189,15 @@ export class Job {
    */
   readonly batch?: BatchConfig;
 
+  /**
+   * Budgets this job draws on when it dispatches, with the cost each
+   * debits.
+   *
+   * `cost` is the value that applies, resolved to the default where the
+   * enqueue left it out.
+   */
+  readonly budgets: BudgetBinding[];
+
   /** @internal */
   private client: Client;
 
@@ -211,6 +224,7 @@ export class Job {
     this.duplicate = data.duplicate;
     this.folded = data.folded;
     this.batch = data.batch;
+    this.budgets = data.budgets ?? [];
   }
 
   /**
@@ -286,6 +300,7 @@ export class Job {
       duplicate: this.duplicate,
       folded: this.folded,
       batch: this.batch,
+      budgets: this.budgets,
     };
   }
 }

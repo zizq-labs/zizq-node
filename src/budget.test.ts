@@ -328,6 +328,185 @@ describe("budgets", () => {
     });
   });
 
+  // The binding travels through `EnqueueInput` -> `resolveInput` ->
+  // `EnqueueOptions` -> `enqueueToApi`, and each of those assembles its
+  // result field by field. Testing through `enqueue()` rather than
+  // `enqueueRaw()` is the point: only the former crosses `resolveInput`,
+  // which is where a missed field would be dropped in silence.
+  describe("binding at enqueue", () => {
+    it("sends bindings through enqueue()", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body) => {
+            const parsed = JSON.parse(body) as Record<string, unknown>;
+            assert.deepEqual(parsed.budgets, [{ key: "emails", cost: 2 }]);
+            return true;
+          },
+        })
+        .reply(201, { id: "j1", type: "t", queue: "q", status: "ready", payload: {}, ready_at: 1, attempts: 0 }, JSON_HEADERS);
+
+      await ctx.client.enqueue({
+        type: "send_email",
+        queue: "emails",
+        payload: {},
+        budgets: [{ key: "emails", cost: 2 }],
+      });
+    });
+
+    it("sends bindings through enqueueRaw() too", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body) => {
+            const parsed = JSON.parse(body) as Record<string, unknown>;
+            assert.deepEqual(parsed.budgets, [{ key: "emails" }]);
+            return true;
+          },
+        })
+        .reply(201, { id: "j1", type: "t", queue: "q", status: "ready", payload: {}, ready_at: 1, attempts: 0 }, JSON_HEADERS);
+
+      await ctx.client.enqueueRaw({
+        type: "send_email",
+        queue: "emails",
+        payload: {},
+        budgets: [{ key: "emails" }],
+      });
+    });
+
+    it("converts a createWith policy to the wire form", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body) => {
+            const parsed = JSON.parse(body) as { budgets: Record<string, unknown>[] };
+            assert.deepEqual(parsed.budgets[0]!.create_with, {
+              allocation: 100,
+              strategy: { type: "time_based", duration_ms: 60_000 },
+            });
+            return true;
+          },
+        })
+        .reply(201, { id: "j1", type: "t", queue: "q", status: "ready", payload: {}, ready_at: 1, attempts: 0 }, JSON_HEADERS);
+
+      await ctx.client.enqueue({
+        type: "send_email",
+        queue: "emails",
+        payload: {},
+        budgets: [
+          {
+            key: "emails",
+            createWith: {
+              allocation: 100,
+              strategy: { type: "time_based", durationMs: 60_000 },
+            },
+          },
+        ],
+      });
+    });
+
+    // An unthrottled job pays nothing for the feature on the wire, which
+    // is how the server reports one back too.
+    it("omits the field entirely when there are no bindings", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs",
+          method: "POST",
+          body: (body) => !("budgets" in (JSON.parse(body) as object)),
+        })
+        .reply(201, { id: "j1", type: "t", queue: "q", status: "ready", payload: {}, ready_at: 1, attempts: 0 }, JSON_HEADERS)
+        .times(2);
+
+      await ctx.client.enqueue({ type: "t", queue: "q", payload: {} });
+      await ctx.client.enqueue({ type: "t", queue: "q", payload: {}, budgets: [] });
+    });
+
+    // A cron entry's job template goes through `cronJobToApi`, a fourth
+    // assembly of the same shape.
+    it("sends bindings on a cron entry's job template", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/crons/nightly",
+          method: "PUT",
+          body: (body) => {
+            const parsed = JSON.parse(body) as { entries: { job: Record<string, unknown> }[] };
+            assert.deepEqual(parsed.entries[0]!.job.budgets, [{ key: "emails", cost: 5 }]);
+            return true;
+          },
+        })
+        .reply(200, { name: "nightly", entries: [] }, JSON_HEADERS);
+
+      await ctx.client.replaceCronGroup("nightly", {
+        entries: [
+          {
+            name: "digest",
+            expression: "0 9 * * *",
+            job: {
+              type: "digest",
+              queue: "emails",
+              payload: {},
+              budgets: [{ key: "emails", cost: 5 }],
+            },
+          },
+        ],
+      });
+    });
+  });
+
+  describe("reading bindings back off a job", () => {
+    it("reports what the job draws on", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1", method: "GET" })
+        .reply(
+          200,
+          {
+            id: "j1", type: "t", queue: "q", status: "ready", payload: {},
+            ready_at: 1, attempts: 0,
+            budgets: [{ key: "emails", cost: 2 }],
+          },
+          JSON_HEADERS
+        );
+
+      const job = await ctx.client.getJob("j1");
+      assert.deepEqual(job.budgets, [{ key: "emails", cost: 2 }]);
+    });
+
+    // Absent means none — the server omits the field rather than
+    // sending an empty array, so there is nothing to distinguish.
+    it("reports an unthrottled job as empty rather than undefined", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1", method: "GET" })
+        .reply(
+          200,
+          { id: "j1", type: "t", queue: "q", status: "ready", payload: {}, ready_at: 1, attempts: 0 },
+          JSON_HEADERS
+        );
+
+      const job = await ctx.client.getJob("j1");
+      assert.deepEqual(job.budgets, []);
+    });
+
+    it("survives toJSON", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1", method: "GET" })
+        .reply(
+          200,
+          {
+            id: "j1", type: "t", queue: "q", status: "ready", payload: {},
+            ready_at: 1, attempts: 0,
+            budgets: [{ key: "emails", cost: 2 }],
+          },
+          JSON_HEADERS
+        );
+
+      const job = await ctx.client.getJob("j1");
+      assert.deepEqual(job.toJSON().budgets, [{ key: "emails", cost: 2 }]);
+    });
+  });
+
   describe("deleteBudget", () => {
     it("deletes and resolves", async () => {
       ctx.mockPool.intercept({ path: "/budgets/emails", method: "DELETE" }).reply(204, "");

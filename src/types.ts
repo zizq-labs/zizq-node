@@ -155,6 +155,18 @@ export interface EnqueueOptions {
    * Requires a pro license on the server.
    */
   batch?: BatchConfig;
+
+  /**
+   * Budgets this job draws on when it dispatches.
+   *
+   * A job that cannot currently be afforded in any of its budgets
+   * waits rather than being dispatched. Other jobs continue
+   * dispatching unimpacted. Omit or leave empty for an unthrottled
+   * job.
+   *
+   * Requires a pro license on the server.
+   */
+  budgets?: BudgetBindingInput[];
 }
 
 /** How a budget's tokens are managed. */
@@ -658,6 +670,17 @@ export interface EnqueueInput {
     when: string;
     fold: string;
   };
+
+  /**
+   * Budgets this job draws on when it dispatches.
+   *
+   * A job that cannot afford its cost waits rather than dispatching —
+   * it is not failed, and it does not leave the queue. Omit or leave
+   * empty for an unthrottled job.
+   *
+   * Requires a pro license on the server.
+   */
+  budgets?: BudgetBindingInput[];
 }
 
 
