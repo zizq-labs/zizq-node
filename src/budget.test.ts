@@ -458,6 +458,36 @@ describe("budgets", () => {
     });
   });
 
+  // The high-level `cron().register()` form assembles its job template
+  // separately from `enqueue()`, so it needs its own coverage — the
+  // low-level `replaceCronGroup` path above does not exercise it.
+  it("sends bindings on a cron entry registered the high-level way", async () => {
+    ctx.mockPool
+      .intercept({
+        path: "/crons/nightly",
+        method: "PUT",
+        body: (body) => {
+          const parsed = JSON.parse(body) as { entries: { job: Record<string, unknown> }[] };
+          assert.deepEqual(parsed.entries[0]!.job.budgets, [{ key: "emails", cost: 5 }]);
+          return true;
+        },
+      })
+      .reply(200, { name: "nightly", entries: [] }, JSON_HEADERS);
+
+    await ctx.client.cron("nightly").register({
+      entries: [
+        {
+          name: "digest",
+          expression: "0 9 * * *",
+          type: "digest",
+          queue: "emails",
+          payload: {},
+          budgets: [{ key: "emails", cost: 5 }],
+        },
+      ],
+    });
+  });
+
   describe("reading bindings back off a job", () => {
     it("reports what the job draws on", async () => {
       ctx.mockPool

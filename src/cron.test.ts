@@ -5,6 +5,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createMockContext, type MockContext } from "./test-helpers.ts";
 import type { JobFunction } from "./handler.ts";
+import { batchConfig } from "./batch-config.ts";
 
 describe("CronHandle", () => {
   let ctx: MockContext;
@@ -79,6 +80,74 @@ describe("CronHandle", () => {
       }],
     });
     assert.equal(group.name, "default");
+  });
+
+  // The high-level form assembles its job template separately from
+  // `enqueue()`, so every enqueue field it offers needs its own
+  // coverage — a field declared on the definition but not passed
+  // through `resolveEntryDefinition` is dropped in silence.
+  it("register() carries batch config, resolving a function key", async () => {
+    let sent: Record<string, unknown> | undefined;
+
+    ctx.mockPool
+      .intercept({
+        path: "/crons/default",
+        method: "PUT",
+        body: (body: string) => {
+          sent = JSON.parse(body).entries[0].job.batch;
+          return true;
+        },
+      })
+      .reply(200, cronGroupResponse, {
+        headers: { "content-type": "application/json" },
+      });
+
+    await ctx.client.cron("default").register({
+      entries: [{
+        name: "e1",
+        expression: "0 9 * * *",
+        type: "digest",
+        queue: "q",
+        payload: { items: [1] },
+        batch: batchConfig(1000, ".items"),
+      }],
+    });
+
+    assert.ok(sent, "batch was dropped from the job template");
+    // The key is a function on the way in and a string on the wire.
+    assert.equal(typeof sent.key, "string");
+    assert.match(sent.when as string, /length <= 1000/);
+    assert.match(sent.fold as string, /\.items/);
+  });
+
+  it("register() carries budgets", async () => {
+    let sent: unknown;
+
+    ctx.mockPool
+      .intercept({
+        path: "/crons/default",
+        method: "PUT",
+        body: (body: string) => {
+          sent = JSON.parse(body).entries[0].job.budgets;
+          return true;
+        },
+      })
+      .reply(200, cronGroupResponse, {
+        headers: { "content-type": "application/json" },
+      });
+
+    await ctx.client.cron("default").register({
+      entries: [{
+        name: "e1",
+        expression: "0 9 * * *",
+        type: "digest",
+        queue: "q",
+        payload: {},
+        budgets: [{ key: "emails", cost: 5 }],
+      }],
+    });
+
+    assert.deepEqual(sent, [{ key: "emails", cost: 5 }]);
   });
 
   it("register() resolves function references", async () => {
