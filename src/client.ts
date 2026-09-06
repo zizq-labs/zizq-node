@@ -325,6 +325,32 @@ export class NotFoundError extends ClientError {
   }
 }
 
+/**
+ * 409 specifically — the resource is in a state that refuses the
+ * operation, and repeating the request unchanged will not help.
+ *
+ * Thrown where something already exists (a budget key, a cron entry
+ * name, a budget binding a job already has) and where something is
+ * still referenced (a budget a job or cron entry still draws on).
+ *
+ * Can be handled as success in cases where code simply declares the
+ * necessary existence of a resource:
+ *
+ * ```ts
+ * try {
+ *   await client.defineBudget({ key: "emails", allocation: 100, strategy });
+ * } catch (err) {
+ *   if (!(err instanceof ConflictError)) throw err;
+ * }
+ * ```
+ */
+export class ConflictError extends ClientError {
+  constructor(message: string, body?: unknown) {
+    super(message, 409, body);
+    this.name = "ConflictError";
+  }
+}
+
 /** 5xx server error — something went wrong on the server. Retryable. */
 export class ServerError extends ResponseError {
   constructor(message: string, status: number, body?: unknown) {
@@ -1077,7 +1103,7 @@ export class Client {
    * });
    * ```
    *
-   * @throws {ClientError} If the cron entry already exists (409)
+   * @throws {ConflictError} If an entry with that name already exists (409)
    */
   async addCronEntry(group: string, entry: CronEntryInput): Promise<CronEntry> {
     const raw = await this.handleResponse(
@@ -1649,6 +1675,7 @@ function errorFromApi(raw: unknown): ErrorRecordData {
 function buildResponseError(status: number, body: unknown): ResponseError {
   const message = (body as { error?: string } | undefined)?.error ?? `HTTP ${status}`;
   if (status === 404) return new NotFoundError(message, body);
+  if (status === 409) return new ConflictError(message, body);
   if (status >= 400 && status < 500) return new ClientError(message, status, body);
   if (status >= 500) return new ServerError(message, status, body);
   return new ResponseError(message, status, body);
