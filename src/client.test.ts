@@ -1341,6 +1341,39 @@ describe("Client", () => {
       assert.equal(entry.name, "e1");
     });
 
+    // A duplicate entry name is the pre-existing 409 in this client, so
+    // it is where the mapping is worth pinning. Budgets add two more —
+    // a key that exists, and one still drawn on — but the class is not
+    // budget-specific.
+    it("addCronEntry throws ConflictError when the name is taken", async () => {
+      ctx.mockPool
+        .intercept({ path: "/crons/default/entries", method: "POST" })
+        .reply(409, { error: "cron entry 'e1' already exists" }, {
+          headers: { "content-type": "application/json" },
+        });
+
+      const { ConflictError, NotFoundError } = await import("./client.ts");
+      await assert.rejects(
+        () =>
+          ctx.client.addCronEntry("default", {
+            name: "e1",
+            expression: "* * * * *",
+            job: { type: "test", queue: "q", payload: {} },
+          }),
+        (err: unknown) => {
+          assert.ok(err instanceof ConflictError);
+          assert.equal(err.status, 409);
+          assert.equal(err.message, "cron entry 'e1' already exists");
+          // Subclasses ClientError, so code already catching that is
+          // unaffected — and is distinct from the other 4xx, which is
+          // the point of having it.
+          assert.ok(err instanceof ClientError);
+          assert.ok(!(err instanceof NotFoundError));
+          return true;
+        }
+      );
+    });
+
     it("replaceCronEntry sends PUT and returns CronEntry", async () => {
       ctx.mockPool
         .intercept({ path: "/crons/default/entries/e1", method: "PUT" })

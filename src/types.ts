@@ -157,6 +157,148 @@ export interface EnqueueOptions {
   batch?: BatchConfig;
 }
 
+/** How a budget's tokens are managed. */
+export type BudgetStrategyType = "time_based" | "while_in_flight";
+
+/**
+ * How a budget is managed.
+ *
+ * A discriminated union, so a `while_in_flight` budget carrying a
+ * `durationMs` is a compile error rather than a request the server
+ * rejects. That strategy has no clock — its tokens are released when a
+ * job stops running — so a period would read as though it set a refill
+ * rate that does not exist.
+ *
+ * `durationMs` is the period over which the whole allocation
+ * replenishes. Tokens accrue on a continuous drip rather than in fixed
+ * windows, so an empty bucket is half full after half the duration.
+ *
+ * `burst` caps how many tokens the bucket may hold at once. A bucket
+ * starts full, so `100` per minute permits two hundred dispatches in
+ * the first minute before settling to its long-run rate; a `burst` caps
+ * that spike without changing the rate, and a `burst` of `1` paces
+ * dispatches evenly with no excess accrual.
+ */
+export type BudgetStrategy =
+  | { type: "time_based"; durationMs: number; burst?: number }
+  | { type: "while_in_flight" };
+
+/** A budget's policy, without the key it is stored under. */
+export interface BudgetPolicy {
+  /** Tokens the bucket makes available when full. */
+  allocation: number;
+
+  /** How those tokens are released back to the bucket. */
+  strategy: BudgetStrategy;
+}
+
+/** A budget as the server reports it. */
+export interface Budget extends BudgetPolicy {
+  /** The key this budget is stored under, unique across the server. */
+  key: string;
+
+  /** When it was first defined (ms since epoch). */
+  createdAt?: number;
+
+  /** When its policy last changed (ms since epoch). */
+  updatedAt?: number;
+}
+
+/** Options for defining a budget. */
+export interface DefineBudgetOptions extends BudgetPolicy {
+  /** The key to store it under. */
+  key: string;
+
+  /**
+   * Overwrite an existing budget rather than conflicting.
+   *
+   * Without this a key that already exists is a `ConflictError`, which
+   * is often desirable if handled (e.g. in application startup code).
+   */
+  replace?: boolean;
+}
+
+/**
+ * A merge patch over a budget's strategy.
+ *
+ * Only what is named is sent. `burst: null` clears the ceiling back to
+ * the allocation; `burst: undefined` leaves it alone. A `null` `type` or
+ * `durationMs` is not valid.
+ */
+export interface BudgetStrategyPatch {
+  type?: BudgetStrategyType;
+  durationMs?: number;
+  burst?: number | null;
+}
+
+/** Options for amending a budget's policy. */
+export interface UpdateBudgetOptions {
+  /** Change the tokens the bucket is holds when full. */
+  allocation?: number;
+
+  /** Change part of the strategy, leaving the rest alone. */
+  strategy?: BudgetStrategyPatch;
+}
+
+/**
+ * A job's binding to a budget, as written.
+ *
+ * `cost` is how many tokens one job debits when it dispatches,
+ * defaulting to 1, so jobs can weigh differently against the same
+ * budget. It has to fit inside the budget's capacity — the burst where
+ * one is set, and the allocation otherwise — or the job could never
+ * be dispatched.
+ */
+export interface BudgetBindingInput {
+  /** Key of the budget to draw from. */
+  key: string;
+
+  /** Tokens this job consumes on dispatch. Defaults to 1. */
+  cost?: number;
+
+  /**
+   * Policy to create the budget with if it does not exist yet, binding
+   * and creating in one request.
+   *
+   * Ignored when the budget already exists — the server stays
+   * authoritative, so an enqueue cannot restate a throttle an operator
+   * has configured.
+   */
+  createWith?: BudgetPolicy;
+}
+
+/**
+ * A job's binding to a budget, as the server reports it.
+ *
+ * Intentionally narrower than {@link BudgetBindingInput}: `cost` is
+ * always present, resolved to the default where the enqueue omitted it,
+ * and there is no `createWith`.
+ */
+export interface BudgetBinding {
+  /** Key of the budget this job draws from. */
+  key: string;
+
+  /** Tokens consumed when it dispatches. */
+  cost: number;
+}
+
+/**
+ * The outcome of changing the budgets of many jobs at once.
+ *
+ * `blocked` lists the jobs that matched the filter and would have
+ * changed, but could not because they were in flight and already
+ * consumed tokens against their budgets. They drain on their own, so
+ * it is a retry list. Jobs that matched and needed no change are
+ * counted in neither.
+ */
+export interface BudgetChange {
+  /** How many jobs were changed. */
+  changed: number;
+
+  /** IDs of jobs that were in flight so could not be changed. */
+  blocked: string[];
+}
+
 /** Options for reporting a job failure. */
 export interface FailureOptions {
   /** Error message describing what went wrong. */

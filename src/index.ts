@@ -14,6 +14,7 @@ export {
   ResponseError,
   ClientError,
   NotFoundError,
+  ConflictError,
   ServerError,
 } from "./client.ts";
 
@@ -41,6 +42,16 @@ export type {
   DeleteAllJobsOptions,
   CronEntryInput,
   ReplaceCronGroupOptions,
+  BudgetStrategyType,
+  BudgetStrategy,
+  BudgetPolicy,
+  Budget,
+  DefineBudgetOptions,
+  BudgetStrategyPatch,
+  UpdateBudgetOptions,
+  BudgetBindingInput,
+  BudgetBinding,
+  BudgetChange,
 } from "./types.ts";
 
 export type {
