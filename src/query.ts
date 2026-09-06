@@ -26,6 +26,8 @@
 import type {
   Client,
   JobFilter,
+  BudgetBindingInput,
+  BudgetChange,
   JobStatus,
   RangeFilter,
   SortDirection,
@@ -164,6 +166,9 @@ export interface JobQueryOptions {
   /** Filter by status. */
   status?: JobStatus | JobStatus[];
 
+  /** Filter by the budgets a job draws on. */
+  budgetsKey?: string | string[];
+
   /** jq expression applied to the payload. */
   jqFilter?: string;
 
@@ -249,6 +254,7 @@ export class JobQuery extends Lazy<Job> {
   private _id?: string | string[];
   private _queue?: string | string[];
   private _type?: string | string[];
+  private _budgetsKey?: string | string[];
   private _status?: JobStatus | JobStatus[];
   private _jqFilter?: string;
   private _priority?: RangeFilter;
@@ -266,6 +272,7 @@ export class JobQuery extends Lazy<Job> {
     this._queue = options.queue;
     this._type = options.type;
     this._status = options.status;
+    this._budgetsKey = options.budgetsKey;
     this._jqFilter = options.jqFilter;
     this._priority = options.priority;
     this._readyAt = options.readyAt;
@@ -295,6 +302,19 @@ export class JobQuery extends Lazy<Job> {
   /** Add a queue to the existing queue filter. */
   addQueue(queue: string | string[]): JobQuery {
     return this.rebuild({ queue: concat(this._queue, queue) });
+  }
+
+  /**
+   * Filter by the budgets a job draws on. Replaces any existing budget
+   * filter.
+   */
+  byBudgetsKey(budgetsKey: string | string[] | undefined): JobQuery {
+    return this.rebuild({ budgetsKey });
+  }
+
+  /** Add a budget to the existing budget filter. */
+  addBudgetsKey(budgetsKey: string | string[]): JobQuery {
+    return this.rebuild({ budgetsKey: concat(this._budgetsKey, budgetsKey) });
   }
 
   /** Filter by job type. Replaces any existing type filter. */
@@ -632,6 +652,7 @@ export class JobQuery extends Lazy<Job> {
       queue: this._queue,
       type: this._type,
       status: this._status,
+      budgetsKey: this._budgetsKey,
       filter: this._jqFilter,
       priority: this._priority,
       readyAt: this._readyAt,
@@ -652,6 +673,56 @@ export class JobQuery extends Lazy<Job> {
     }
   }
 
+  /**
+   * Bind every job this query matches to a budget, skipping over those
+   * already bound to it.
+   *
+   * Named for the binding rather than the budget: this changes what
+   * these jobs draw on, and creates or deletes no budget.
+   */
+  async bindBudget(binding: BudgetBindingInput): Promise<BudgetChange> {
+    return this.client.bindAllJobsBudget(binding, this.toWhere());
+  }
+
+  /**
+   * Bind every matching job to a budget, replacing any existing binding
+   * to it.
+   */
+  async rebindBudget(binding: BudgetBindingInput): Promise<BudgetChange> {
+    return this.client.rebindAllJobsBudget(binding, this.toWhere());
+  }
+
+  /**
+   * Change what an existing binding costs, leaving the binding alone.
+   * Matching jobs not bound to the budget are passed over.
+   */
+  async setBudgetCost(key: string, cost: number): Promise<BudgetChange> {
+    return this.client.setAllJobsBudgetCost(key, cost, this.toWhere());
+  }
+
+  /**
+   * Unbind one budget from every matching job, leaving their others
+   * alone.
+   *
+   * ```ts
+   * await client.jobs().byBudgetsKey("emails").unbindBudget("emails");
+   * await client.deleteBudget("emails");
+   * ```
+   */
+  async unbindBudget(key: string): Promise<BudgetChange> {
+    return this.client.unbindAllJobsBudget(key, this.toWhere());
+  }
+
+  /**
+   * Unbind *every* budget from every matching job.
+   *
+   * Beware: on an unfiltered query this strips every job on the server
+   * of its budgets.
+   */
+  async clearBudgets(): Promise<BudgetChange> {
+    return this.client.clearAllJobsBudgets(this.toWhere());
+  }
+
   // --- Internal helpers ---
 
   private toWhere(): JobFilter {
@@ -660,6 +731,7 @@ export class JobQuery extends Lazy<Job> {
       queue: this._queue,
       type: this._type,
       status: this._status,
+      budgetsKey: this._budgetsKey,
       filter: this._jqFilter,
       priority: this._priority,
       readyAt: this._readyAt,
@@ -673,6 +745,7 @@ export class JobQuery extends Lazy<Job> {
       queue: this._queue,
       type: this._type,
       status: this._status,
+      budgetsKey: this._budgetsKey,
       jqFilter: this._jqFilter,
       priority: this._priority,
       readyAt: this._readyAt,

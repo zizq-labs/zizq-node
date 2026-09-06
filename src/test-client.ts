@@ -319,6 +319,15 @@ export class TestClient extends Client {
         uniqueKey: options.uniqueKey,
         uniqueWhile: options.uniqueWhile,
         batch: options.batch,
+        // Resolved the way the server resolves them, so a recorded job
+        // reports the cost that would actually apply rather than the
+        // `undefined` the caller left. `as never` below defeats the
+        // type check that would otherwise catch this field going
+        // missing, so it is worth stating explicitly.
+        budgets: (options.budgets ?? []).map((b) => ({
+          key: b.key,
+          cost: b.cost ?? 1,
+        })),
       } as never),
     };
 

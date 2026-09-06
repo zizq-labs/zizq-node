@@ -683,7 +683,7 @@ export class Client {
   async deleteAllJobs(options: DeleteAllJobsOptions = {}): Promise<number> {
     assertOnlyKeys("deleteAllJobs", options, ["where"]);
     const where = options.where ?? {};
-    assertOnlyKeys("deleteAllJobs.where", where, ["id", "status", "queue", "type", "filter", "priority", "readyAt", "attempts"]);
+    assertOnlyKeys("deleteAllJobs.where", where, ["id", "status", "queue", "type", "budgetsKey", "filter", "priority", "readyAt", "attempts"]);
 
     // Build the filter params, then short-circuit if any array filter resolved
     // to empty — an empty filter matches nothing, and we don't want to
@@ -741,7 +741,7 @@ export class Client {
    * ```
    */
   async countJobs(where: JobFilter = {}): Promise<number> {
-    assertOnlyKeys("countJobs", where, ["id", "status", "queue", "type", "filter", "priority", "readyAt", "attempts"]);
+    assertOnlyKeys("countJobs", where, ["id", "status", "queue", "type", "budgetsKey", "filter", "priority", "readyAt", "attempts"]);
 
     const params = buildJobFilter(where);
     if (isEmptyFilter(params)) return 0;
@@ -801,7 +801,7 @@ export class Client {
   async updateAllJobs(options: UpdateAllJobsOptions): Promise<number> {
     assertOnlyKeys("updateAllJobs", options, ["where", "apply"]);
     const where = options.where ?? {};
-    assertOnlyKeys("updateAllJobs.where", where, ["id", "status", "queue", "type", "filter", "priority", "readyAt", "attempts"]);
+    assertOnlyKeys("updateAllJobs.where", where, ["id", "status", "queue", "type", "budgetsKey", "filter", "priority", "readyAt", "attempts"]);
 
     // Same empty-filter short-circuit as deleteAllJobs.
     const params = buildJobFilter(where);
@@ -972,6 +972,182 @@ export class Client {
       await this.request("GET", `/jobs/${encodeURIComponent(id)}/errors/${encodeURIComponent(String(attempt))}`)
     );
     return this.wrapError(raw);
+  }
+
+  /**
+   * Bind a single job to a budget it is not already bound to.
+   *
+   * Only queued (`"scheduled"`, `"ready"`) jobs may be rebound: an
+   * in-flight one already debited tokens from its budgets, and jobs
+   * in a terminal status are always immutable.
+   *
+   * @returns The updated job, whose `budgets` reflect the change.
+   * @throws {ConflictError} If the job already draws on that budget —
+   *   use `rebindJobBudget` to replace it, or `setJobBudgetCost` to
+   *   change only what it costs.
+   * @throws {ClientError} (422) If the job is not queued.
+   */
+  async bindJobBudget(id: string, binding: BudgetBindingInput): Promise<Job> {
+    return this.jobBudgetRequest("POST", id, binding.key, bindingBodyToApi(binding));
+  }
+
+  /**
+   * Bind a single job to a budget, replacing any existing binding to it.
+   *
+   * Unlike `bindJobBudget` this never conflicts. The binding is
+   * replaced whole.
+   */
+  async rebindJobBudget(id: string, binding: BudgetBindingInput): Promise<Job> {
+    return this.jobBudgetRequest("PUT", id, binding.key, bindingBodyToApi(binding));
+  }
+
+  /**
+   * Change what a single job's existing binding costs, leaving the binding
+   * itself alone.
+   *
+   * @throws {NotFoundError} If the job is not bound to that budget.
+   * @throws {ClientError} (422) If the new cost exceeds the budget's
+   *   capacity, since the job would never be dispatched.
+   */
+  async setJobBudgetCost(id: string, key: string, cost: number): Promise<Job> {
+    return this.jobBudgetRequest("PATCH", id, key, { cost });
+  }
+
+  /**
+   * Unbind one budget from a single job, leaving its other budgets alone.
+   *
+   * @throws {NotFoundError} If the job does is not bound to it.
+   */
+  async unbindJobBudget(id: string, key: string): Promise<Job> {
+    return this.jobBudgetRequest("DELETE", id, key);
+  }
+
+  /** Unbind every budget from a single job, leaving it unthrottled. */
+  async unbindAllJobBudgets(id: string): Promise<Job> {
+    return this.wrapJob(
+      await this.handleResponse(
+        await this.request("DELETE", `/jobs/${encodeURIComponent(id)}/budgets`)
+      )
+    );
+  }
+
+  /**
+   * Replace the whole set of budgets a single job is bound to.
+   *
+   * Budgets absent from `bindings` are unbound. Passing `[]` is
+   * the same as `unbindAllJobBudgets`.
+   */
+  async replaceJobBudgets(id: string, bindings: BudgetBindingInput[]): Promise<Job> {
+    return this.wrapJob(
+      await this.handleResponse(
+        await this.put(`/jobs/${encodeURIComponent(id)}/budgets`, {
+          budgets: bindings.map(bindingBodyToApi),
+        })
+      )
+    );
+  }
+
+  /**
+   * Bind every job matching the filter to a budget, skipping over those
+   * already bound to it.
+   *
+   * Unlike the single-job form this does not conflict — a bulk
+   * operation cannot usefully fail on one member of its selection.
+   *
+   * @returns What changed, and any jobs that were in flight and so
+   *   could not be rebound.
+   */
+  async bindAllJobsBudget(
+    binding: BudgetBindingInput,
+    where: JobFilter = {}
+  ): Promise<BudgetChange> {
+    return this.bulkBudgetRequest("POST", binding.key, where, bindingBodyToApi(binding));
+  }
+
+  /**
+   * Bind every matching job to a budget, replacing any existing binding
+   * to it.
+   */
+  async rebindAllJobsBudget(
+    binding: BudgetBindingInput,
+    where: JobFilter = {}
+  ): Promise<BudgetChange> {
+    return this.bulkBudgetRequest("PUT", binding.key, where, bindingBodyToApi(binding));
+  }
+
+  /**
+   * Change what an existing binding costs across every matching job.
+   *
+   * Jobs not bound to the budget are skipped over. The capacity check is
+   * against the budget itself, so an oversized cost fails the whole
+   * call rather than a subset of the selection.
+   */
+  async setAllJobsBudgetCost(
+    key: string,
+    cost: number,
+    where: JobFilter = {}
+  ): Promise<BudgetChange> {
+    return this.bulkBudgetRequest("PATCH", key, where, { cost });
+  }
+
+  /**
+   * Unbind one budget from every matching job, leaving their other
+   * bindings unchanged.
+   */
+  async unbindAllJobsBudget(key: string, where: JobFilter = {}): Promise<BudgetChange> {
+    return this.bulkBudgetRequest("DELETE", key, where);
+  }
+
+  /**
+   * Unbind *every* budget from every matching job.
+   *
+   * Beware: an unfiltered call strips every stored job of its budgets.
+   */
+  async clearAllJobsBudgets(where: JobFilter = {}): Promise<BudgetChange> {
+    const params = buildJobFilter(where);
+    if (isEmptyFilter(params)) return { changed: 0, blocked: [] };
+
+    const qs = params.toString();
+
+    return budgetChangeFromApi(
+      await this.handleResponse(
+        await this.request("DELETE", `/jobs/budgets${qs ? "?" + qs : ""}`)
+      )
+    );
+  }
+
+  private async jobBudgetRequest(
+    method: "POST" | "PUT" | "PATCH" | "DELETE",
+    id: string,
+    key: string,
+    body?: Record<string, unknown>
+  ): Promise<Job> {
+    const path = `/jobs/${encodeURIComponent(id)}/budgets/${encodeURIComponent(key)}`;
+    const res =
+      method === "DELETE"
+        ? await this.request(method, path)
+        : await this.requestWithBody(method, path, body ?? {});
+    return this.wrapJob(await this.handleResponse(res));
+  }
+
+  private async bulkBudgetRequest(
+    method: "POST" | "PUT" | "PATCH" | "DELETE",
+    key: string,
+    where: JobFilter,
+    body?: Record<string, unknown>
+  ): Promise<BudgetChange> {
+    const params = buildJobFilter(where);
+    // An empty array filter matches nothing; sending no parameter would
+    // match everything.
+    if (isEmptyFilter(params)) return { changed: 0, blocked: [] };
+
+    const qs = params.toString();
+    const path = `/jobs/budgets/${encodeURIComponent(key)}${qs ? "?" + qs : ""}`;
+    const res =
+      method === "DELETE"
+        ? await this.request(method, path)
+        : await this.requestWithBody(method, path, body ?? {});
+    return budgetChangeFromApi(await this.handleResponse(res));
   }
 
   /**
@@ -1586,7 +1762,8 @@ function isEmptyFilter(params: URLSearchParams): boolean {
     params.get("id") === "" ||
     params.get("status") === "" ||
     params.get("queue") === "" ||
-    params.get("type") === ""
+    params.get("type") === "" ||
+    params.get("budgets.key") === ""
   );
 }
 
@@ -1643,6 +1820,9 @@ function buildJobFilter(
   if (where.status != null) params.set("status", toCommaList(where.status));
   if (where.queue != null) params.set("queue", toCommaList(where.queue));
   if (where.type != null) params.set("type", toCommaList(where.type));
+  // Dotted on the wire, mirroring the `budgets` array on a job rather
+  // than inventing a second name for the same thing.
+  if (where.budgetsKey != null) params.set("budgets.key", toCommaList(where.budgetsKey));
   if (where.filter != null) params.set("filter", where.filter);
 
   const priority = encodeRange(where.priority);
@@ -1834,6 +2014,23 @@ function budgetBindingsFromApi(raw: unknown): BudgetBinding[] {
     const b = entry as Record<string, unknown>;
     return { key: b.key as string, cost: b.cost as number };
   });
+}
+
+/** Build the body for a single binding; the key travels in the path. */
+function bindingBodyToApi(b: BudgetBindingInput): Record<string, unknown> {
+  return stripUndefined({
+    cost: b.cost,
+    create_with: b.createWith && budgetPolicyToApi(b.createWith),
+  });
+}
+
+/** Convert an API-format bulk budget result to camelCase. */
+function budgetChangeFromApi(raw: unknown): BudgetChange {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    changed: (r.changed as number) ?? 0,
+    blocked: (r.blocked as string[]) ?? [],
+  };
 }
 
 /** Convert a BackoffConfig to API format. */
