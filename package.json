@@ -34,6 +34,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types --import ./src/test-setup.ts 'src/**/*.test.ts'"
   },

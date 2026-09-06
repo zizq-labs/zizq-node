@@ -626,11 +626,26 @@ describe("budgets", () => {
         .intercept({
           path: "/jobs/j1/budgets",
           method: "PUT",
-          body: JSON.stringify({ budgets: [{ cost: 2 }] }),
+          body: JSON.stringify({ budgets: [{ key: "emails", cost: 2 }] }),
         })
         .reply(200, JOB_RESPONSE, JSON_HEADERS);
 
       await ctx.client.replaceJobBudgets("j1", [{ key: "emails", cost: 2 }]);
+    });
+
+    // An empty array means "unbind everything" and must reach the
+    // server as `[]`, not be omitted the way an unthrottled *enqueue*
+    // omits the field.
+    it("replaces with an empty set", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1/budgets",
+          method: "PUT",
+          body: JSON.stringify({ budgets: [] }),
+        })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+
+      await ctx.client.replaceJobBudgets("j1", []);
     });
 
     // The same operations hang off the resource, which is where you

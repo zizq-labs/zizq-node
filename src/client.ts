@@ -1041,7 +1041,12 @@ export class Client {
     return this.wrapJob(
       await this.handleResponse(
         await this.put(`/jobs/${encodeURIComponent(id)}/budgets`, {
-          budgets: bindings.map(bindingBodyToApi),
+          // The key belongs in each entry here, unlike the single
+          // binding endpoints where it travels in the path. `?? []` is
+          // load-bearing: an empty array means "unbind everything",
+          // where `budgetBindingsToApi` returns undefined so an
+          // *enqueue* omits the field entirely.
+          budgets: budgetBindingsToApi(bindings) ?? [],
         })
       )
     );

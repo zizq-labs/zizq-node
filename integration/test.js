@@ -23,6 +23,7 @@ import {
   Worker,
   NotFoundError,
   ClientError,
+  ConflictError,
   batchConfig,
 } from "@zizq-labs/zizq";
 
@@ -118,6 +119,414 @@ describe("integration", { concurrency: 1 }, () => {
       received.sort((a, b) => a - b),
       Array.from({ length: count }, (_, i) => i),
     );
+  });
+
+  // --- Budgets (requires Pro license) ---
+  //
+  // `reset()` in `beforeEach` wipes budgets as well as jobs and cron
+  // groups (the server deletes cron groups, then jobs, then budgets, so
+  // nothing references a budget by the time it is removed), which is
+  // what keeps these isolated from each other.
+
+  describe("budgets", () => {
+    it("defines, reads, amends and deletes a policy", async () => {
+      try {
+        const created = await client.defineBudget({
+          key: "emails",
+          allocation: 100,
+          strategy: { type: "time_based", durationMs: 60_000 },
+        });
+        assert.equal(created.key, "emails");
+
+        // The round trip that matters: milliseconds out, the same
+        // milliseconds back. A mocked response cannot catch a mismatch
+        // in the `duration_ms` mapping.
+        const read = await client.getBudget("emails");
+        assert.equal(read.allocation, 100);
+        assert.deepEqual(read.strategy, { type: "time_based", durationMs: 60_000 });
+        assert.ok(typeof read.createdAt === "number");
+
+        const keys = (await client.listBudgets()).map((b) => b.key);
+        assert.ok(keys.includes("emails"));
+
+        // Merge patch recurses into the strategy: the burst changes
+        // without restating the kind or the period.
+        const patched = await client.updateBudget("emails", { strategy: { burst: 5 } });
+        assert.equal(patched.strategy.burst, 5);
+        assert.equal(patched.strategy.durationMs, 60_000);
+
+        // `null` is the one meaningful clear.
+        const cleared = await client.updateBudget("emails", { strategy: { burst: null } });
+        assert.ok(!("burst" in cleared.strategy));
+
+        await client.deleteBudget("emails");
+        await assert.rejects(() => client.getBudget("emails"), NotFoundError);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    it("round trips a clockless budget", async () => {
+      try {
+        await client.defineBudget({
+          key: "stripe",
+          allocation: 3,
+          strategy: { type: "while_in_flight" },
+        });
+
+        const read = await client.getBudget("stripe");
+        assert.deepEqual(read.strategy, { type: "while_in_flight" });
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    // `POST` refuses rather than overwriting, which is what lets every
+    // instance declare its budgets on boot without coordinating.
+    it("conflicts on a second definition, unless replacing", async () => {
+      try {
+        const policy = {
+          key: "emails",
+          allocation: 1,
+          strategy: { type: "while_in_flight" },
+        };
+        await client.defineBudget(policy);
+
+        await assert.rejects(() => client.defineBudget(policy), ConflictError);
+        assert.equal((await client.getBudget("emails")).allocation, 1);
+
+        await client.defineBudget({ ...policy, allocation: 5, replace: true });
+        assert.equal((await client.getBudget("emails")).allocation, 5);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    it("binds at enqueue and reads back off the job", async () => {
+      try {
+        await client.defineBudget({
+          key: "emails",
+          allocation: 100,
+          strategy: { type: "while_in_flight" },
+        });
+
+        const job = await client.enqueue({
+          type: "bound_job",
+          queue: "budget-integration",
+          payload: {},
+          budgets: [{ key: "emails", cost: 3 }],
+        });
+        assert.deepEqual(job.budgets, [{ key: "emails", cost: 3 }]);
+
+        // And on a fresh read, not only on the enqueue response.
+        const refetched = await client.getJob(job.id);
+        assert.deepEqual(refetched.budgets, [{ key: "emails", cost: 3 }]);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    // Binding and creating in one request, which is what lets an
+    // application bring its own throttles up without a provisioning
+    // step.
+    it("creates the budget as a side effect of createWith", async () => {
+      try {
+        const job = await client.enqueue({
+          type: "bound_job",
+          queue: "budget-integration",
+          payload: {},
+          budgets: [
+            {
+              key: "made-on-demand",
+              cost: 2,
+              createWith: {
+                allocation: 50,
+                strategy: { type: "time_based", durationMs: 30_000 },
+              },
+            },
+          ],
+        });
+        assert.equal(job.budgets[0].cost, 2);
+
+        const budget = await client.getBudget("made-on-demand");
+        assert.equal(budget.allocation, 50);
+        assert.equal(budget.strategy.durationMs, 30_000);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    it("changes what one job draws on", async () => {
+      try {
+        for (const key of ["a", "b"]) {
+          await client.defineBudget({
+            key,
+            allocation: 100,
+            strategy: { type: "while_in_flight" },
+          });
+        }
+
+        let job = await client.enqueue({
+          type: "rebind_job",
+          queue: "budget-integration",
+          payload: {},
+        });
+        assert.deepEqual(job.budgets, []);
+
+        job = await job.bindBudget({ key: "a", cost: 2 });
+        assert.deepEqual(job.budgets, [{ key: "a", cost: 2 }]);
+
+        await assert.rejects(() => job.bindBudget({ key: "a" }), ConflictError);
+
+        job = await job.setBudgetCost("a", 4);
+        assert.equal(job.budgets[0].cost, 4);
+
+        // A replace is whole, so the cost returns to the default.
+        job = await job.rebindBudget({ key: "a" });
+        assert.equal(job.budgets[0].cost, 1);
+
+        job = await job.replaceBudgets([{ key: "a" }, { key: "b", cost: 5 }]);
+        assert.deepEqual(job.budgets.map((b) => b.key).sort(), ["a", "b"]);
+
+        job = await job.unbindBudget("b");
+        assert.deepEqual(job.budgets.map((b) => b.key), ["a"]);
+
+        job = await job.unbindAllBudgets();
+        assert.deepEqual(job.budgets, []);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    // The pairing `budgetsKey` exists for: a budget cannot be deleted
+    // while anything draws on it, and the filter selects what is in the
+    // way.
+    it("drains a budget by what draws on it, then deletes it", async () => {
+      try {
+        await client.defineBudget({
+          key: "emails",
+          allocation: 100,
+          strategy: { type: "while_in_flight" },
+        });
+
+        for (let i = 0; i < 3; i++) {
+          await client.enqueue({
+            type: "bound_job",
+            queue: "budget-integration",
+            payload: { i },
+            budgets: [{ key: "emails" }],
+          });
+        }
+
+        assert.equal(await client.countJobs({ budgetsKey: "emails" }), 3);
+        await assert.rejects(() => client.deleteBudget("emails"), ConflictError);
+
+        const change = await client.jobs().byBudgetsKey("emails").unbindBudget("emails");
+        assert.deepEqual(change, { changed: 3, blocked: [] });
+
+        assert.equal(await client.countJobs({ budgetsKey: "emails" }), 0);
+        await client.deleteBudget("emails");
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    it("binds and clears in bulk over a query", async () => {
+      try {
+        await client.defineBudget({
+          key: "emails",
+          allocation: 100,
+          strategy: { type: "while_in_flight" },
+        });
+
+        for (let i = 0; i < 3; i++) {
+          await client.enqueue({
+            type: "bulk_job",
+            queue: "budget-bulk",
+            payload: { i },
+          });
+        }
+
+        const bound = await client.jobs().byQueue("budget-bulk")
+          .bindBudget({ key: "emails", cost: 2 });
+        assert.equal(bound.changed, 3);
+
+        await client.jobs().byQueue("budget-bulk").setBudgetCost("emails", 7);
+        const costs = [];
+        for await (const job of client.jobs().byQueue("budget-bulk")) {
+          costs.push(job.budgets[0].cost);
+        }
+        assert.deepEqual(costs, [7, 7, 7]);
+
+        const cleared = await client.jobs().byQueue("budget-bulk").clearBudgets();
+        assert.equal(cleared.changed, 3);
+        assert.equal(await client.countJobs({ budgetsKey: "emails" }), 0);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+  });
+
+  // --- Throttling (requires Pro license) ---
+  //
+  // Built so the assertions are about *counts*, not elapsed time. The
+  // rate-limit test uses a one-minute period, so the second token
+  // cannot arrive inside the few seconds the test runs however loaded
+  // the machine is; the concurrency test measures overlap rather than
+  // duration and has no timing component at all.
+
+  describe("throttling", () => {
+    it("while_in_flight never runs two at once", async () => {
+      try {
+        await client.defineBudget({
+          key: "one-at-a-time",
+          allocation: 1,
+          strategy: { type: "while_in_flight" },
+        });
+
+        const count = 5;
+        for (let i = 0; i < count; i++) {
+          await client.enqueue({
+            type: "concurrency_probe",
+            queue: "budget-concurrency",
+            payload: { i },
+            budgets: [{ key: "one-at-a-time" }],
+          });
+        }
+
+        let inFlight = 0;
+        let peak = 0;
+        let done = 0;
+
+        const worker = new Worker({
+          client,
+          queues: ["budget-concurrency"],
+          concurrency: 4,
+          logger: noopLogger,
+          handler: async () => {
+            inFlight += 1;
+            peak = Math.max(peak, inFlight);
+            await new Promise((r) => setTimeout(r, 50));
+            inFlight -= 1;
+            done += 1;
+            if (done === count) worker.stop();
+          },
+        });
+
+        const timeout = setTimeout(() => worker.kill(), 30_000);
+        await worker.run();
+        clearTimeout(timeout);
+
+        assert.equal(done, count);
+        assert.equal(peak, 1, `budget allowed ${peak} jobs in flight at once`);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    // One token per *minute* with a burst of 1, so exactly one job is
+    // affordable and the refill provably cannot arrive inside the
+    // window this test waits. The assertion is a count, and the grace
+    // is the best part of a minute.
+    it("a rate limit withholds what it cannot afford", async () => {
+      try {
+        await client.defineBudget({
+          key: "one-per-minute",
+          allocation: 1,
+          strategy: { type: "time_based", durationMs: 60_000, burst: 1 },
+        });
+
+        for (let i = 0; i < 3; i++) {
+          await client.enqueue({
+            type: "throttled_probe",
+            queue: "budget-throttled",
+            payload: { i },
+            budgets: [{ key: "one-per-minute" }],
+          });
+        }
+
+        let performed = 0;
+        const worker = new Worker({
+          client,
+          queues: ["budget-throttled"],
+          concurrency: 2,
+          logger: noopLogger,
+          handler: async () => {
+            performed += 1;
+          },
+        });
+
+        // Run for a fixed window rather than until a count is reached:
+        // the point is what does *not* happen in it.
+        const stop = setTimeout(() => worker.stop(), 4_000);
+        const timeout = setTimeout(() => worker.kill(), 30_000);
+        await worker.run();
+        clearTimeout(stop);
+        clearTimeout(timeout);
+
+        assert.equal(performed, 1, `expected the budget to afford exactly one job`);
+        assert.equal(
+          await client.countJobs({ queue: "budget-throttled", status: ["ready", "scheduled"] }),
+          2,
+        );
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
+
+    // The positive control: a budget with room to spare must not hold
+    // anything back, so a bug that throttles everything cannot pass the
+    // test above by accident.
+    it("a generous budget does not throttle", async () => {
+      try {
+        await client.defineBudget({
+          key: "roomy",
+          allocation: 100,
+          strategy: { type: "time_based", durationMs: 1_000 },
+        });
+
+        const count = 3;
+        for (let i = 0; i < count; i++) {
+          await client.enqueue({
+            type: "throttled_probe",
+            queue: "budget-throttled",
+            payload: { i },
+            budgets: [{ key: "roomy" }],
+          });
+        }
+
+        let performed = 0;
+        const worker = new Worker({
+          client,
+          queues: ["budget-throttled"],
+          concurrency: 2,
+          logger: noopLogger,
+          handler: async () => {
+            performed += 1;
+            if (performed === count) worker.stop();
+          },
+        });
+
+        const timeout = setTimeout(() => worker.kill(), 30_000);
+        await worker.run();
+        clearTimeout(timeout);
+
+        assert.equal(performed, count);
+      } catch (err) {
+        if (err instanceof ClientError && err.status === 403) return;
+        throw err;
+      }
+    });
   });
 
   it("query jobs", async () => {
