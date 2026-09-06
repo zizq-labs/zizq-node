@@ -340,6 +340,105 @@ inputs.
                 payload before the job is enqueued.
             </td>
         </tr>
+        <tr>
+            <td>
+                <div><code>budgets</code></div>
+                <div><pre>BudgetBindingInput[]?</pre></div>
+            </td>
+            <td>
+                Budgets this job is bound to and must satisfy before it
+                dispatches. This is used for rate limiting and concurrency
+                control.  See
+                <a href="./budgets.md">Concurrency &amp; Rate Limiting</a>
+                for full details on this feature. Requires a pro license on the
+                server.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].key</code></div>
+                <div><pre>string</pre></div>
+            </td>
+            <td>
+                The key that identifies this budget.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].cost</code></div>
+                <div><pre>number?</pre></div>
+            </td>
+            <td>
+                The number of tokens this job draws from the budget when it
+                dispatches. Default to <code>1</code> when not specified.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].createWith</code></div>
+                <div><pre>BudgetPolicy?</pre></div>
+            </td>
+            <td>
+                Optional definition of the budget's policy to be used if the
+                budget does not already exist.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].createWith.allocation</code></div>
+                <div><pre>number</pre></div>
+            </td>
+            <td>
+                The total number of tokens made available by the budget. Must
+                not be less than the job's <code>cost</code>.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].createWith.strategy</code></div>
+                <div><pre>BudgetStrategy</pre></div>
+            </td>
+            <td>
+                The definition for how this budget's tokens are managed.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].createWith.strategy.type</code></div>
+                <div><pre>"while_in_flight" | "time_based"</pre></div>
+            </td>
+            <td>
+                Enum specifying which strategy to use. A
+                <code>while_in_flight</code> strategy implements concurrency
+                control — jobs debit tokens on dispatch, and release them on
+                completion. A <code>time_based</code> strategy implements a
+                rate limit — jobs debit tokens on dispatch, and those tokens
+                are automatically released on a timer. Tokens continue accruing
+                until the <code>allocation</code> is full, or the
+                <code>burst</code> is reached if set.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].createWith.strategy.durationMs</code></div>
+                <div><pre>number?</pre></div>
+            </td>
+            <td>
+                Required for a <code>time_based</code> strategy. Specifies the
+                period of time over which tokens are replenished.
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div><code>budgets[].createWith.strategy.burst</code></div>
+                <div><pre>number?</pre></div>
+            </td>
+            <td>
+                Only valid for a <code>time_based</code> strategy. Specifies
+                the maximum number of tokens the budget may accrue at once.
+                The default value is the same as the <code>allocation</code>.
+            </td>
+        </tr>
     </tbody>
 </table>
 

@@ -72,6 +72,51 @@ Both 6-field (with seconds) and standard 5-field cron expressions are accepted.
 > });
 > ```
 
+### Batching scheduled jobs
+
+An entry may carry `batch`, so a schedule that fires while a previous job of
+the same batch is still pending folds into it rather than creating a second
+one. See [Batched Jobs](./batched-jobs.md).
+
+> ``` ts
+> import { batchConfig } from "@zizq-labs/zizq";
+>
+> await client.cron("my-cron").register({
+>   entries: [
+>     {
+>       name: "flush_audit_events",
+>       expression: "*/5 * * * *",
+>       type: "audit.events",
+>       queue: "audit",
+>       payload: { events: [] },
+>       batch: batchConfig(1000, ".events"),
+>     },
+>   ],
+> });
+> ```
+
+### Throttling scheduled jobs
+
+An entry may carry `budgets`, so a scheduled job is throttled exactly as an
+enqueued one is — it fires on its expression, then waits on the server until
+its budgets can afford it. See
+[Concurrency & Rate Limiting](./budgets.md).
+
+> ``` ts
+> await client.cron("my-cron").register({
+>   entries: [
+>     {
+>       name: "send_daily_digest",
+>       expression: "0 9 * * *",
+>       type: "send_daily_digest",
+>       queue: "emails",
+>       payload: {},
+>       budgets: [{ key: "emails", cost: 5 }],
+>     },
+>   ],
+> });
+> ```
+
 ### Timezones
 
 The `timezone` passed to `register()` applies to every entry that does not
