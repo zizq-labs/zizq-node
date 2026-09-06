@@ -78,6 +78,16 @@ export type {
   RangeBounds,
   RangeFilter,
   ReplaceCronGroupOptions,
+  BudgetStrategyType,
+  BudgetStrategy,
+  BudgetPolicy,
+  Budget,
+  DefineBudgetOptions,
+  BudgetStrategyPatch,
+  UpdateBudgetOptions,
+  BudgetBindingInput,
+  BudgetBinding,
+  BudgetChange,
 } from "./types.ts";
 
 import type {
@@ -100,6 +110,16 @@ import type {
   CronEntryInput,
   RangeBounds,
   ReplaceCronGroupOptions,
+  BudgetStrategyType,
+  BudgetStrategy,
+  BudgetPolicy,
+  Budget,
+  DefineBudgetOptions,
+  BudgetStrategyPatch,
+  UpdateBudgetOptions,
+  BudgetBindingInput,
+  BudgetBinding,
+  BudgetChange,
 } from "./types.ts";
 
 // Re-export resource types so consumers can import from client.ts.
@@ -955,6 +975,117 @@ export class Client {
   }
 
   /**
+   * List every budget defined on the server, with its policy.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @example
+   * ```ts
+   * for (const budget of await client.listBudgets()) {
+   *   console.log(budget.key, budget.allocation);
+   * }
+   * ```
+   */
+  async listBudgets(): Promise<Budget[]> {
+    const data = await this.handleResponse(
+      await this.request("GET", "/budgets")
+    ) as { budgets?: unknown[] };
+    return (data.budgets ?? []).map(budgetFromApi);
+  }
+
+  /**
+   * Fetch a single budget's policy.
+   *
+   * @param key - The budget key.
+   * @throws {NotFoundError} If no budget exists under that key.
+   */
+  async getBudget(key: string): Promise<Budget> {
+    const raw = await this.handleResponse(
+      await this.request("GET", `/budgets/${encodeURIComponent(key)}`)
+    );
+    return budgetFromApi(raw);
+  }
+
+  /**
+   * Define a budget.
+   *
+   * By default refuses when one already exists under the key, throwing
+   * {@link ConflictError} and leaving the stored policy untouched — so
+   * an application declaring its budgets on boot cannot clobber an
+   * existing budget that has since been tuned. Every instance can call
+   * this and treat the conflict as success if existence is all that
+   * matters:
+   *
+   * ```ts
+   * try {
+   *   await client.defineBudget({ key: "emails", allocation: 100, strategy });
+   * } catch (err) {
+   *   if (!(err instanceof ConflictError)) throw err;
+   * }
+   * ```
+   *
+   * Pass `replace: true` to overwrite instead, which never conflicts. A
+   * replace changes the policy, not the budget's identity, so
+   * `createdAt` survives it.
+   *
+   * Requires a Pro license on the server.
+   *
+   * @example
+   * ```ts
+   * await client.defineBudget({
+   *   key: "emails",
+   *   allocation: 100,
+   *   strategy: { type: "time_based", durationMs: 60_000 },
+   * });
+   * ```
+   *
+   * @throws {ConflictError} If the key exists and `replace` was not set.
+   * @throws {ClientError} (422) If a replacement allocation is below a
+   *   cost already required by a queued job or a cron entry, since such
+   *   jobs would never dispatch.
+   */
+  async defineBudget(options: DefineBudgetOptions): Promise<Budget> {
+    const { key, replace, ...policy } = options;
+    const path = `/budgets/${encodeURIComponent(key)}`;
+    const body = budgetPolicyToApi(policy);
+    const res = replace ? await this.put(path, body) : await this.post(path, body);
+    return budgetFromApi(await this.handleResponse(res));
+  }
+
+  /**
+   * Amend named fields of a budget's policy, leaving the rest alone.
+   *
+   * A recursive merge patch, so strategy-level fields can be changed
+   * without repeating the type and duration. `burst: null` clears the
+   * ceiling back to the allocation; omitting it leaves it alone.
+   *
+   * @example
+   * ```ts
+   * await client.updateBudget("emails", { strategy: { burst: 5 } });
+   * ```
+   *
+   * @throws {NotFoundError} If no budget exists under that key
+   */
+  async updateBudget(key: string, options: UpdateBudgetOptions): Promise<Budget> {
+    const raw = await this.handleResponse(
+      await this.patch(`/budgets/${encodeURIComponent(key)}`, updateBudgetToApi(options))
+    );
+    return budgetFromApi(raw);
+  }
+
+  /**
+   * Delete a budget.
+   *
+   * @throws {NotFoundError} If no budget exists under that key.
+   * @throws {ConflictError} While anything still binds to it.
+   */
+  async deleteBudget(key: string): Promise<void> {
+    await this.handleResponse(
+      await this.request("DELETE", `/budgets/${encodeURIComponent(key)}`)
+    );
+  }
+
+  /**
    * List all cron group names.
    *
    * Requires a Pro license on the server.
@@ -1597,6 +1728,74 @@ function failureToApi(opts: FailureOptions): Record<string, unknown> {
     retry_at: opts.retryAt,
     kill: opts.kill,
   });
+}
+
+/** Convert a budget policy to the server's snake_case API format. */
+function budgetPolicyToApi(policy: BudgetPolicy): Record<string, unknown> {
+  return {
+    allocation: policy.allocation,
+    strategy: budgetStrategyToApi(policy.strategy),
+  };
+}
+
+function budgetStrategyToApi(s: BudgetStrategy): Record<string, unknown> {
+  // The kind is carried through rather than reconstructed per branch.
+  // Special-casing one kind and hardcoding the other in the fallthrough
+  // means anything unrecognised — a third strategy, or a value from
+  // plain JS where the union cannot help — is *relabelled* as the
+  // hardcoded one rather than rejected, which the server then accepts
+  // as a perfectly valid budget of the wrong sort.
+  //
+  // Widened rather than narrowed: a strategy with no period simply has
+  // none of these fields, and `stripUndefined` omits them.
+  const wide = s as { type: string; durationMs?: number; burst?: number };
+
+  return stripUndefined({
+    type: wide.type,
+    duration_ms: wide.durationMs,
+    burst: wide.burst,
+  });
+}
+
+/**
+ * Convert an UpdateBudgetOptions to API format.
+ *
+ * `stripUndefined` is what makes the merge patch work: an omitted field
+ * is absent from the body and the server leaves it alone, while an
+ * explicit `burst: null` survives as JSON null and clears the ceiling.
+ */
+function updateBudgetToApi(opts: UpdateBudgetOptions): Record<string, unknown> {
+  return stripUndefined({
+    allocation: opts.allocation,
+    strategy: opts.strategy && stripUndefined({
+      type: opts.strategy.type,
+      duration_ms: opts.strategy.durationMs,
+      burst: opts.strategy.burst,
+    }),
+  });
+}
+
+/** Convert an API-format budget to camelCase. */
+function budgetFromApi(raw: unknown): Budget {
+  const r = raw as Record<string, unknown>;
+  const s = (r.strategy ?? {}) as Record<string, unknown>;
+
+  // Symmetrical with `budgetStrategyToApi`, and for the same reason: a
+  // kind this client does not know about reads back as itself rather
+  // than as whichever branch happened to catch it.
+  const strategy = stripUndefined({
+    type: s.type,
+    durationMs: s.duration_ms,
+    burst: s.burst,
+  }) as unknown as BudgetStrategy;
+
+  return stripUndefined({
+    key: r.key,
+    allocation: r.allocation,
+    strategy,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }) as unknown as Budget;
 }
 
 /** Convert a BackoffConfig to API format. */
