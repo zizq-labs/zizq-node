@@ -456,6 +456,12 @@ export interface ListJobsOptions {
    */
   attempts?: RangeFilter;
 
+  /**
+   * Filter by the budgets a job is bound to. Accepts a single key or an
+   * array, matching a job bound to any of them.
+   */
+  budgetsKey?: string | string[];
+
   /** jq expression to filter jobs by payload. */
   filter?: string;
 }
@@ -517,6 +523,12 @@ export interface JobFilter {
    * range with inclusive bounds. `0` selects jobs that have never failed.
    */
   attempts?: RangeFilter;
+
+  /**
+   * Filter by the budgets a job is bound to. Accepts a single key or an
+   * array, matching a job bound to any of them.
+   */
+  budgetsKey?: string | string[];
 
   /** jq expression to filter jobs by payload. */
   filter?: string;

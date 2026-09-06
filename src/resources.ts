@@ -17,6 +17,7 @@ import type {
   BackoffConfig,
   BatchConfig,
   BudgetBinding,
+  BudgetBindingInput,
   RetentionConfig,
   EnqueueOptions,
   FailureOptions,
@@ -275,6 +276,46 @@ export class Job {
    */
   async update(options: UpdateJobOptions): Promise<Job> {
     return this.client.updateJob(this.id, options);
+  }
+
+  /**
+   * Bind this job to a budget it does not already draw on.
+   *
+   * @returns The updated job. `Job` is a value class, so this instance
+   *   is unchanged — use the returned one.
+   */
+  async bindBudget(binding: BudgetBindingInput): Promise<Job> {
+    return this.client.bindJobBudget(this.id, binding);
+  }
+
+  /** Bind this job to a budget, replacing any existing binding to it. */
+  async rebindBudget(binding: BudgetBindingInput): Promise<Job> {
+    return this.client.rebindJobBudget(this.id, binding);
+  }
+
+  /** Change what an existing binding costs, leaving the binding alone. */
+  async setBudgetCost(key: string, cost: number): Promise<Job> {
+    return this.client.setJobBudgetCost(this.id, key, cost);
+  }
+
+  /** Unbind one budget, leaving this job's other budgets alone. */
+  async unbindBudget(key: string): Promise<Job> {
+    return this.client.unbindJobBudget(this.id, key);
+  }
+
+  /** Unbind every budget, leaving this job unthrottled. */
+  async unbindAllBudgets(): Promise<Job> {
+    return this.client.unbindAllJobBudgets(this.id);
+  }
+
+  /**
+   * Replace the whole set of budgets this job draws on.
+   *
+   * Budgets absent from `bindings` are unbound, so this describes the
+   * job's throttling outright rather than amending it.
+   */
+  async replaceBudgets(bindings: BudgetBindingInput[]): Promise<Job> {
+    return this.client.replaceJobBudgets(this.id, bindings);
   }
 
   /** Return the raw job data as a plain object. */

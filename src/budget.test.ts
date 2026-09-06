@@ -8,6 +8,8 @@ import { createMockContext, type MockContext } from "./test-helpers.ts";
 
 const JSON_HEADERS = { headers: { "content-type": "application/json" } };
 
+const JOB_RESPONSE = { id: "j1", type: "t", queue: "q", status: "ready", payload: {}, ready_at: 1, attempts: 0 };
+
 const budgetResponse = {
   key: "emails",
   allocation: 100,
@@ -504,6 +506,204 @@ describe("budgets", () => {
 
       const job = await ctx.client.getJob("j1");
       assert.deepEqual(job.toJSON().budgets, [{ key: "emails", cost: 2 }]);
+    });
+  });
+
+  describe("the budgetsKey filter", () => {
+    it("is sent as budgets.key", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count?budgets.key=emails", method: "GET" })
+        .reply(200, { count: 3 }, JSON_HEADERS);
+
+      assert.equal(await ctx.client.countJobs({ budgetsKey: "emails" }), 3);
+    });
+
+    it("joins a list with commas", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count?budgets.key=emails%2Cstripe", method: "GET" })
+        .reply(200, { count: 0 }, JSON_HEADERS);
+
+      await ctx.client.countJobs({ budgetsKey: ["emails", "stripe"] });
+    });
+
+    // An empty array selects nothing; omitting the parameter would
+    // select everything, so the call must short-circuit.
+    it("matches nothing when empty, without a request", async () => {
+      assert.equal(await ctx.client.countJobs({ budgetsKey: [] }), 0);
+      assert.equal(await ctx.client.deleteAllJobs({ where: { budgetsKey: [] } }), 0);
+    });
+
+    // `deleteAllJobs` and friends allowlist their filter keys, so a new
+    // one has to be added there too or it throws instead of filtering.
+    it("is accepted by the bulk filter allowlists", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs?budgets.key=emails", method: "DELETE" })
+        .reply(200, { deleted: 2 }, JSON_HEADERS);
+
+      assert.equal(await ctx.client.deleteAllJobs({ where: { budgetsKey: "emails" } }), 2);
+    });
+
+    it("narrows a query", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count?budgets.key=emails", method: "GET" })
+        .reply(200, { count: 7 }, JSON_HEADERS);
+
+      assert.equal(await ctx.client.jobs().byBudgetsKey("emails").count(), 7);
+    });
+
+    it("unions with addBudgetsKey", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/count?budgets.key=a%2Cb", method: "GET" })
+        .reply(200, { count: 0 }, JSON_HEADERS);
+
+      await ctx.client.jobs().byBudgetsKey("a").addBudgetsKey("b").count();
+    });
+  });
+
+  describe("bindings on one job", () => {
+    it("binds and returns the updated job", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1/budgets/emails",
+          method: "POST",
+          body: JSON.stringify({ cost: 2 }),
+        })
+        .reply(200, { ...JOB_RESPONSE, budgets: [{ key: "emails", cost: 2 }] }, JSON_HEADERS);
+
+      const job = await ctx.client.bindJobBudget("j1", { key: "emails", cost: 2 });
+      assert.deepEqual(job.budgets, [{ key: "emails", cost: 2 }]);
+    });
+
+    it("conflicts when already bound", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/budgets/emails", method: "POST" })
+        .reply(409, { error: "job 'j1' already draws on budget 'emails'" }, JSON_HEADERS);
+
+      await assert.rejects(
+        () => ctx.client.bindJobBudget("j1", { key: "emails" }),
+        (err: unknown) => err instanceof ConflictError
+      );
+    });
+
+    it("rebinds with PUT, sending an empty body when no cost is given", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/budgets/emails", method: "PUT", body: "{}" })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+
+      await ctx.client.rebindJobBudget("j1", { key: "emails" });
+    });
+
+    it("patches only the cost", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1/budgets/emails",
+          method: "PATCH",
+          body: JSON.stringify({ cost: 5 }),
+        })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+
+      await ctx.client.setJobBudgetCost("j1", "emails", 5);
+    });
+
+    it("unbinds one budget", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/budgets/emails", method: "DELETE" })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+
+      await ctx.client.unbindJobBudget("j1", "emails");
+    });
+
+    it("unbinds every budget", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/budgets", method: "DELETE" })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+
+      assert.deepEqual((await ctx.client.unbindAllJobBudgets("j1")).budgets, []);
+    });
+
+    it("replaces the whole set", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/j1/budgets",
+          method: "PUT",
+          body: JSON.stringify({ budgets: [{ cost: 2 }] }),
+        })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+
+      await ctx.client.replaceJobBudgets("j1", [{ key: "emails", cost: 2 }]);
+    });
+
+    // The same operations hang off the resource, which is where you
+    // reach for them after a `getJob`.
+    it("are reachable from the Job resource", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1", method: "GET" })
+        .reply(200, JOB_RESPONSE, JSON_HEADERS);
+      ctx.mockPool
+        .intercept({ path: "/jobs/j1/budgets/emails", method: "POST" })
+        .reply(200, { ...JOB_RESPONSE, budgets: [{ key: "emails", cost: 3 }] }, JSON_HEADERS);
+
+      const job = await ctx.client.getJob("j1");
+      const updated = await job.bindBudget({ key: "emails", cost: 3 });
+      assert.deepEqual(updated.budgets, [{ key: "emails", cost: 3 }]);
+    });
+  });
+
+  describe("bulk bindings", () => {
+    it("scopes to the query and reports what changed", async () => {
+      ctx.mockPool
+        .intercept({
+          path: "/jobs/budgets/stripe?queue=emails",
+          method: "POST",
+          body: JSON.stringify({ cost: 2 }),
+        })
+        .reply(200, { changed: 4, blocked: [] }, JSON_HEADERS);
+
+      const change = await ctx.client
+        .jobs()
+        .byQueue("emails")
+        .bindBudget({ key: "stripe", cost: 2 });
+
+      assert.deepEqual(change, { changed: 4, blocked: [] });
+    });
+
+    // In-flight jobs are named rather than silently skipped.
+    it("reports jobs that were in flight", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/budgets/stripe", method: "PUT" })
+        .reply(200, { changed: 2, blocked: ["j7", "j9"] }, JSON_HEADERS);
+
+      const change = await ctx.client.jobs().rebindBudget({ key: "stripe" });
+      assert.deepEqual(change.blocked, ["j7", "j9"]);
+    });
+
+    it("drains a budget by what draws on it", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/budgets/emails?budgets.key=emails", method: "DELETE" })
+        .reply(200, { changed: 12, blocked: [] }, JSON_HEADERS);
+
+      const change = await ctx.client
+        .jobs()
+        .byBudgetsKey("emails")
+        .unbindBudget("emails");
+
+      assert.equal(change.changed, 12);
+    });
+
+    // `clear` removes every budget; `unbind` removes one. The verbs
+    // differ so the two cannot be confused.
+    it("clears every budget from the selection", async () => {
+      ctx.mockPool
+        .intercept({ path: "/jobs/budgets?queue=emails", method: "DELETE" })
+        .reply(200, { changed: 9, blocked: [] }, JSON_HEADERS);
+
+      const change = await ctx.client.jobs().byQueue("emails").clearBudgets();
+      assert.equal(change.changed, 9);
+    });
+
+    it("short-circuits an empty filter without a request", async () => {
+      const change = await ctx.client.jobs().byQueue([]).clearBudgets();
+      assert.deepEqual(change, { changed: 0, blocked: [] });
     });
   });
 
